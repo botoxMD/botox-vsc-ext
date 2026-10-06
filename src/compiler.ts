@@ -121,6 +121,34 @@ function downloadFile(url: string, dest: string): Promise<void> {
     });
 }
 
+function fetchReleaseAssetUrl(target: string, ext: string): Promise<string> {
+    const fallback = `https://github.com/botoxMD/botox-cli/releases/latest/download/botox-v0.1.0-${target}.${ext}`;
+    return new Promise((resolve) => {
+        https.get('https://api.github.com/repos/botoxMD/botox-cli/releases/latest', {
+            headers: { 'User-Agent': 'vscode-botox' }
+        }, (res) => {
+            if (res.statusCode !== 200) {
+                return resolve(fallback);
+            }
+            let body = '';
+            res.on('data', chunk => { body += chunk; });
+            res.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const targetSuffix = `-${target}.${ext}`;
+                    const asset = data.assets?.find((a: any) =>
+                        typeof a.name === 'string' && (a.name.endsWith(targetSuffix) || a.name === `botox-${target}.${ext}`)
+                    );
+                    if (asset && asset.browser_download_url) {
+                        return resolve(asset.browser_download_url);
+                    }
+                } catch {}
+                resolve(fallback);
+            });
+        }).on('error', () => resolve(fallback));
+    });
+}
+
 export async function ensureBotoxBinary(): Promise<string> {
     const current = resolveBotoxBinary();
     if (hasBotoxBinary()) {
@@ -150,7 +178,7 @@ export async function ensureBotoxBinary(): Promise<string> {
     const isWin = platform === 'win32';
     const ext = isWin ? 'zip' : 'tar.gz';
     const archiveName = `botox-${target}.${ext}`;
-    const downloadUrl = `https://github.com/botoxMD/botox-cli/releases/latest/download/${archiveName}`;
+    const downloadUrl = await fetchReleaseAssetUrl(target, ext);
 
     const destDir = path.join(extensionContext.globalStorageUri.fsPath, 'bin');
     fs.mkdirSync(destDir, { recursive: true });
