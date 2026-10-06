@@ -1,32 +1,28 @@
 # Botox VS Code Extension
 
-Official VS Code extension for [Botox](https://github.com/botoxMD/botox-cli) - Modern, fast Markdown typesetting and PDF previewing powered by Typst.
+Official VS Code extension for [Botox](https://github.com/botoxMD/botox-cli) - Publication-grade Markdown typesetting and live preview powered by Typst.
 
 ## Features
 
-- **Side-by-Side Live Preview**: Render high-fidelity Typst-typeset PDFs right beside your active Markdown document.
-- **Embedded PDF Viewer**: Built-in canvas viewer powered by PDF.js with:
-  - Zoom In, Zoom Out, Zoom Reset, and Fit to Width
-  - Multi-page navigation (Next, Previous, Jump to Page)
-  - Dark mode and light mode theme integration
-  - Interactive error notifications showing compilation issues
-- **Direct PDF Export**: Export compiled PDFs to disk alongside your Markdown file or custom build location.
-- **Template Scaffolding**: Quick commands to initialize standard documents and slide decks with presets.
-- **Configurable Auto-Refresh**: Live compile on save or debounced compilation on every keystroke.
+- **Side-by-Side Live Vector Preview**: Render crystal-clear Typst-typeset pages right beside your active Markdown document with infinite vector clarity.
+- **Embedded Standalone Compiler**: Includes the Botox native compiler out of the box with zero external dependencies (no Node, Python, TeX Live, or Pandoc needed). Automatically self-provisions prebuilt binaries on demand.
+- **Real-Time Follow Cursor & Synchronized Scroll**: Automatically synchronizes and vertically centers the preview at your exact editing cursor location, seamlessly handling unnumbered headings, title blocks, and Table of Contents offsets.
+- **Instant Live Typesetting**: Live compilation as you type with intelligent in-flight process cancellation and sub-second rendering.
+- **Smart DOM Diffing**: Only re-renders changed pages in the preview, preserving scroll stability and eliminating browser layout thrashing.
+- **Built-in Preview Controls**:
+  - Zoom In (`Ctrl/Cmd + +`), Zoom Out (`Ctrl/Cmd + -`), Reset (`Ctrl/Cmd + 0`), and Fit to Width
+  - Follow Cursor toggle button
+  - Live compilation timing badge
+- **Direct PDF Export**: Export publication-grade PDFs to disk alongside your Markdown file with a single click.
+- **Template Scaffolding**: Quick commands to initialize documents and slide decks with standard settings.
 
-## Requirements
+## Getting Started
 
-The extension requires the Botox CLI binary installed on your system.
+1. Open any Markdown file (`.md`).
+2. Click the **Botox Preview** button in the top-right editor title bar, or press `Ctrl+K V` (`Cmd+K V` on macOS).
+3. Start typing — the live preview compiles and centers automatically.
 
-If not already installed, build or install `botox` from source or release:
-```bash
-git clone https://github.com/botoxMD/botox-cli.git
-cd botox-cli
-cargo build --release
-cp target/release/botox ~/.local/bin/
-```
-
-Verify that `botox --version` works in your terminal.
+The extension bundles the standalone compiler natively, so no manual installation of Rust or Botox CLI is required.
 
 ## Commands
 
@@ -34,41 +30,20 @@ Verify that `botox --version` works in your terminal.
 | :--- | :--- | :--- |
 | `botox.openPreview` | Botox: Open Live PDF Preview | `Ctrl+K V` / `Cmd+K V` |
 | `botox.compilePdf` | Botox: Compile to PDF | - |
-| `botox.initDocument` | Botox: Initialize Markdown Document | - |
+| `botox.initDocument` | Botox: Initialize New Document | - |
 | `botox.initSlides` | Botox: Initialize Slide Deck | - |
-
-You can also launch the preview from the top-right editor title bar button when viewing any `.md` file.
+| `botox.toggleSyncScroll` | Botox: Toggle Follow Cursor / Sync Scroll | - |
 
 ## Settings
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `botox.executablePath` | string | `botox` | Path to the `botox` executable (or command name if in `PATH`) |
+| `botox.executablePath` | string | `botox` | Custom path to the `botox` binary (defaults to bundled binary, `~/.local/bin/botox`, or `PATH`) |
 | `botox.autoCompileOnSave` | boolean | `true` | Automatically compile and update the preview whenever the file is saved |
-| `botox.autoCompileOnChange` | boolean | `false` | Automatically compile and update the preview while typing |
-| `botox.debounceDelay` | number | `800` | Delay in milliseconds before triggering compilation while typing |
-
-## Development
-
-1. Clone repository:
-   ```bash
-   git clone https://github.com/botoxMD/botox-vsc-ext.git
-   cd botox-vsc-ext
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Compile extension:
-   ```bash
-   npm run compile
-   ```
-4. Package VSIX package:
-   ```bash
-   npx @vscode/vsce package
-   ```
-
-To test locally in VS Code, press `F5` to open an Extension Development Host window.
+| `botox.autoCompileOnChange` | boolean | `true` | Automatically update the live preview on text changes before saving |
+| `botox.debounceDelay` | number | `120` | Delay in milliseconds to wait after the last keystroke before recompiling |
+| `botox.syncScroll` | boolean | `true` | Automatically synchronize preview scroll and position to follow the editor cursor |
+| `botox.bibliography` | boolean | `true` | Transform web links into an automatic IEEE-standard bibliography in documents |
 
 ## License
 
