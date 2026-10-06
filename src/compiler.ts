@@ -3,6 +3,7 @@ import * as child_process from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as https from 'https';
 
 export interface CompilationResult {
     success: boolean;
@@ -27,19 +28,156 @@ export interface VectorCompilationResult {
     durationMs?: number;
 }
 
+let extensionContext: vscode.ExtensionContext | undefined;
+
+export function setExtensionContext(context: vscode.ExtensionContext) {
+    extensionContext = context;
+}
+
 export function resolveBotoxBinary(): string {
+    const isWin = process.platform === 'win32';
+    const binName = isWin ? 'botox.exe' : 'botox';
+
+    // 1. User-configured executable path in VS Code settings
     const config = vscode.workspace.getConfiguration('botox');
     const customPath = config.get<string>('executablePath');
     if (customPath && customPath !== 'botox' && fs.existsSync(customPath)) {
         return customPath;
     }
 
-    const homeLocalBin = path.join(os.homedir(), '.local', 'bin', 'botox');
+    if (extensionContext) {
+        // 2. Bundled binary inside the extension's `bin/` directory
+        const directBundled = path.join(extensionContext.extensionPath, 'bin', binName);
+        if (fs.existsSync(directBundled)) {
+            return directBundled;
+        }
+
+        // 3. Platform/arch-specific bundled directory (e.g. `bin/linux-x64/botox`)
+        const platformArch = `${process.platform}-${process.arch}`;
+        const archBundled = path.join(extensionContext.extensionPath, 'bin', platformArch, binName);
+        if (fs.existsSync(archBundled)) {
+            return archBundled;
+        }
+
+        // 4. Downloaded/cached binary in VS Code global storage
+        const storageBin = path.join(extensionContext.globalStorageUri.fsPath, 'bin', binName);
+        if (fs.existsSync(storageBin)) {
+            return storageBin;
+        }
+    }
+
+    // 5. Standard user local binary path
+    const homeLocalBin = path.join(os.homedir(), '.local', 'bin', binName);
     if (fs.existsSync(homeLocalBin)) {
         return homeLocalBin;
     }
 
-    return 'botox';
+    return binName;
+}
+
+export function hasBotoxBinary(): boolean {
+    const bin = resolveBotoxBinary();
+    if (path.isAbsolute(bin)) {
+        return fs.existsSync(bin);
+    }
+    try {
+        const checkCmd = process.platform === 'win32' ? 'where' : 'which';
+        const res = child_process.spawnSync(checkCmd, [bin], { encoding: 'utf-8' });
+        return res.status === 0 && res.stdout.trim().length > 0;
+    } catch {
+        return false;
+    }
+}
+
+function downloadFile(url: string, dest: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const follow = (curUrl: string, maxRedirects: number = 6) => {
+            if (maxRedirects <= 0) {
+                return reject(new Error('Too many redirects while downloading Botox binary'));
+            }
+            https.get(curUrl, { headers: { 'User-Agent': 'vscode-botox' } }, (res) => {
+                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    return follow(res.headers.location, maxRedirects - 1);
+                }
+                if (res.statusCode !== 200) {
+                    return reject(new Error(`Download failed with HTTP ${res.statusCode}: ${res.statusMessage}`));
+                }
+                const fileStream = fs.createWriteStream(dest);
+                res.pipe(fileStream);
+                fileStream.on('finish', () => {
+                    fileStream.close();
+                    resolve();
+                });
+                fileStream.on('error', (err) => {
+                    try { fs.unlinkSync(dest); } catch {}
+                    reject(err);
+                });
+            }).on('error', (err) => {
+                try { fs.unlinkSync(dest); } catch {}
+                reject(err);
+            });
+        };
+        follow(url);
+    });
+}
+
+export async function ensureBotoxBinary(): Promise<string> {
+    const current = resolveBotoxBinary();
+    if (hasBotoxBinary()) {
+        return current;
+    }
+
+    if (!extensionContext) {
+        return current;
+    }
+
+    const platform = process.platform;
+    const arch = process.arch;
+    let target = '';
+
+    if (platform === 'linux') {
+        target = arch === 'x64' ? 'x86_64-unknown-linux-musl' : (arch === 'arm64' ? 'aarch64-unknown-linux-gnu' : '');
+    } else if (platform === 'darwin') {
+        target = arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+    } else if (platform === 'win32' && arch === 'x64') {
+        target = 'x86_64-pc-windows-msvc';
+    }
+
+    if (!target) {
+        return current;
+    }
+
+    const isWin = platform === 'win32';
+    const ext = isWin ? 'zip' : 'tar.gz';
+    const archiveName = `botox-${target}.${ext}`;
+    const downloadUrl = `https://github.com/botoxMD/botox-cli/releases/latest/download/${archiveName}`;
+
+    const destDir = path.join(extensionContext.globalStorageUri.fsPath, 'bin');
+    fs.mkdirSync(destDir, { recursive: true });
+    const destBinary = path.join(destDir, isWin ? 'botox.exe' : 'botox');
+
+    return vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: `Botox: Downloading standalone compiler for ${platform}-${arch}...`,
+            cancellable: false
+        },
+        async (progress) => {
+            const tempArchive = path.join(destDir, archiveName);
+            progress.report({ message: 'Downloading prebuilt release from GitHub...' });
+            await downloadFile(downloadUrl, tempArchive);
+
+            progress.report({ message: 'Extracting...' });
+            child_process.execSync(`tar -xf "${tempArchive}" -C "${destDir}"`);
+            try { fs.unlinkSync(tempArchive); } catch {}
+
+            if (!isWin && fs.existsSync(destBinary)) {
+                fs.chmodSync(destBinary, 0o755);
+            }
+
+            return destBinary;
+        }
+    );
 }
 
 const activePreviewProcs = new Map<string, child_process.ChildProcess>();
@@ -64,7 +202,15 @@ export async function compileForPreview(
 ): Promise<VectorCompilationResult> {
     abortActivePreview(inputPath);
 
-    const binary = resolveBotoxBinary();
+    let binary: string;
+    try {
+        binary = await ensureBotoxBinary();
+    } catch (e: any) {
+        return {
+            success: false,
+            error: `Could not obtain Botox compiler binary: ${e.message}`
+        };
+    }
     const startTime = Date.now();
     const targetOutput = path.join(
         os.tmpdir(),
@@ -174,7 +320,15 @@ export async function compileDocument(
     outputPath?: string,
     extraArgs: string[] = []
 ): Promise<CompilationResult> {
-    const binary = resolveBotoxBinary();
+    let binary: string;
+    try {
+        binary = await ensureBotoxBinary();
+    } catch (e: any) {
+        return {
+            success: false,
+            error: `Could not obtain Botox compiler binary: ${e.message}`
+        };
+    }
     const startTime = Date.now();
 
     const targetOutput = outputPath || path.join(os.tmpdir(), `botox_preview_${Date.now()}_${path.basename(inputPath, '.md')}.pdf`);
@@ -232,7 +386,15 @@ export async function runInit(
     targetDir: string,
     filename: string
 ): Promise<{ success: boolean; error?: string }> {
-    const binary = resolveBotoxBinary();
+    let binary: string;
+    try {
+        binary = await ensureBotoxBinary();
+    } catch (e: any) {
+        return {
+            success: false,
+            error: `Could not obtain Botox compiler binary: ${e.message}`
+        };
+    }
     return new Promise((resolve) => {
         child_process.execFile(
             binary,

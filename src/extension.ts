@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { BotoxPreviewPanel } from './preview';
-import { compileDocument, runInit } from './compiler';
+import { compileDocument, runInit, setExtensionContext } from './compiler';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+    setExtensionContext(context);
     // 1. Open Preview to the Side
     const openPreviewCmd = vscode.commands.registerCommand(
         'botox.openPreview',
