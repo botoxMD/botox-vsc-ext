@@ -69,11 +69,13 @@ export class BotoxPreviewPanel {
         this.update();
     }
 
-    public scrollToLine(line: number, totalLines: number) {
+    public scrollToLine(line: number, totalLines: number, queryText?: string, headingText?: string) {
         this._panel.webview.postMessage({
             type: 'syncScroll',
             line,
-            totalLines
+            totalLines,
+            queryText,
+            headingText
         });
     }
 
@@ -408,15 +410,106 @@ export class BotoxPreviewPanel {
       }
     }
 
-    function handleSyncScroll(line, totalLines) {
+    function scrollToElement(el) {
+      const elRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const offset = Math.min(containerRect.height * 0.25, 140);
+      const currentScroll = container.scrollTop;
+      const targetScroll = currentScroll + (elRect.top - containerRect.top) - offset;
+
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      const clampedTarget = Math.max(0, Math.min(targetScroll, maxScroll));
+
+      const distance = Math.abs(currentScroll - clampedTarget);
+      container.scrollTo({
+        top: clampedTarget,
+        behavior: distance < 1200 ? 'smooth' : 'auto'
+      });
+    }
+
+    function findBestTextElement(query, targetRatio, totalPages) {
+      if (!query || query.length < 3) return null;
+
+      const cleanQuery = query.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleanQuery.length < 3) return null;
+
+      const words = cleanQuery.split(' ').filter(w => w.length >= 3);
+      if (words.length === 0) return null;
+
+      const expectedPageIndex = Math.round(targetRatio * (totalPages - 1));
+      const pages = container.querySelectorAll('.page-box');
+
+      let bestEl = null;
+      let bestScore = -1;
+
+      pages.forEach((pageBox, pageIdx) => {
+        const textElements = pageBox.querySelectorAll('svg text');
+        const pageDistance = Math.abs(pageIdx - expectedPageIndex);
+        const pagePenalty = pageDistance * 12;
+
+        textElements.forEach(el => {
+          const elText = el.textContent || '';
+          const cleanEl = elText.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (cleanEl.length < 2) return;
+
+          let score = 0;
+          if (cleanEl === cleanQuery) {
+            score = 100;
+          } else if (cleanEl.includes(cleanQuery) || cleanQuery.includes(cleanEl)) {
+            const overlap = Math.min(cleanEl.length, cleanQuery.length);
+            score = 60 + Math.min(overlap, 30);
+          } else {
+            let matchedWords = 0;
+            for (const w of words) {
+              if (cleanEl.includes(w)) {
+                matchedWords++;
+              }
+            }
+            if (matchedWords > 0) {
+              score = (matchedWords / words.length) * 50;
+            }
+          }
+
+          if (score > 0) {
+            const finalScore = score - pagePenalty;
+            if (finalScore > bestScore) {
+              bestScore = finalScore;
+              bestEl = el;
+            }
+          }
+        });
+      });
+
+      return bestScore > 20 ? bestEl : null;
+    }
+
+    function handleSyncScroll(line, totalLines, queryText, headingText) {
       if (!syncScrollEnabled || totalLines <= 1) return;
 
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
 
       const ratio = Math.min(Math.max(line / (totalLines - 1), 0), 1);
-      const targetTop = ratio * maxScroll;
+      const pages = container.querySelectorAll('.page-box');
+      const totalPages = pages.length || 1;
 
+      // 1. Try finding exact/best element for current line
+      let targetEl = findBestTextElement(queryText, ratio, totalPages);
+
+      // 2. If not found, try the enclosing heading text
+      if (!targetEl && headingText) {
+        targetEl = findBestTextElement(headingText, ratio, totalPages);
+      }
+
+      // 3. If found, scroll right to the element!
+      if (targetEl) {
+        scrollToElement(targetEl);
+        return;
+      }
+
+      // 4. Fallback to proportional scroll
+      const targetTop = ratio * maxScroll;
       const currentTop = container.scrollTop;
       const distance = Math.abs(currentTop - targetTop);
 
@@ -549,7 +642,7 @@ export class BotoxPreviewPanel {
       if (message.type === 'pages') {
         renderPages(message.pages, message.durationMs);
       } else if (message.type === 'syncScroll') {
-        handleSyncScroll(message.line, message.totalLines);
+        handleSyncScroll(message.line, message.totalLines, message.queryText, message.headingText);
       } else if (message.type === 'setSyncScroll') {
         syncScrollEnabled = Boolean(message.enabled);
         updateSyncButtonUI();

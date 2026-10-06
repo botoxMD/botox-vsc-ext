@@ -170,6 +170,41 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+function cleanMarkdownLine(line: string): string {
+    return line
+        .replace(/^#+\s*/, '')                   // strip heading markers
+        .replace(/^[-*+]\s+/, '')                // strip bullet markers
+        .replace(/^\d+\.\s+/, '')                // strip numbered list markers
+        .replace(/^>\s*/, '')                    // strip blockquotes
+        .replace(/`([^`]+)`/g, '$1')             // strip inline code
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links [text](url)
+        .replace(/[*_~]+/g, '')                  // strip bold/italic/strike
+        .replace(/:::[a-z]*/gi, '')              // strip pandoc fenced divs
+        .trim();
+}
+
+function getSyncContext(document: vscode.TextDocument, line: number) {
+    const totalLines = document.lineCount;
+    const currentLineText = line < totalLines ? document.lineAt(line).text : '';
+    const queryText = cleanMarkdownLine(currentLineText);
+
+    let headingText = '';
+    for (let i = Math.min(line, totalLines - 1); i >= 0; i--) {
+        const text = document.lineAt(i).text.trim();
+        if (text.startsWith('#')) {
+            headingText = cleanMarkdownLine(text);
+            break;
+        }
+    }
+
+    return {
+        line,
+        totalLines,
+        queryText,
+        headingText
+    };
+}
+
     // Follow Cursor & Synchronized Scroll
     let scrollThrottleTimeout: NodeJS.Timeout | undefined;
     const syncScrollToPreview = (editor: vscode.TextEditor, line: number) => {
@@ -192,8 +227,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         scrollThrottleTimeout = setTimeout(() => {
             scrollThrottleTimeout = undefined;
-            const totalLines = editor.document.lineCount;
-            panel.scrollToLine(line, totalLines);
+            const ctx = getSyncContext(editor.document, line);
+            panel.scrollToLine(ctx.line, ctx.totalLines, ctx.queryText, ctx.headingText);
         }, 40);
     };
 
