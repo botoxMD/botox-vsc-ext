@@ -210,13 +210,34 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         }
     }
 
+    let prevHeading: { text: string; line: number } | null = null;
+    let nextHeading: { text: string; line: number } | null = null;
+
+    for (let i = line; i >= 0; i--) {
+        const text = document.lineAt(i).text.trim();
+        if (text.startsWith('#')) {
+            prevHeading = { text: cleanMarkdownLine(text), line: i };
+            break;
+        }
+    }
+
+    for (let i = line + 1; i < totalLines; i++) {
+        const text = document.lineAt(i).text.trim();
+        if (text.startsWith('#')) {
+            nextHeading = { text: cleanMarkdownLine(text), line: i };
+            break;
+        }
+    }
+
     return {
         line,
         totalLines,
         frontmatterEndLine,
         queryText,
         headingText,
-        isHeading
+        isHeading,
+        prevHeading,
+        nextHeading
     };
 }
 
@@ -249,7 +270,9 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
                 ctx.queryText,
                 ctx.headingText,
                 ctx.isHeading,
-                ctx.frontmatterEndLine
+                ctx.frontmatterEndLine,
+                ctx.prevHeading,
+                ctx.nextHeading
             );
         }, 40);
     };

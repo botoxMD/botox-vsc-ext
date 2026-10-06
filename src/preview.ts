@@ -75,7 +75,9 @@ export class BotoxPreviewPanel {
         queryText?: string,
         headingText?: string,
         isHeading?: boolean,
-        frontmatterEndLine?: number
+        frontmatterEndLine?: number,
+        prevHeading?: { text: string; line: number } | null,
+        nextHeading?: { text: string; line: number } | null
     ) {
         this._panel.webview.postMessage({
             type: 'syncScroll',
@@ -84,7 +86,9 @@ export class BotoxPreviewPanel {
             queryText,
             headingText,
             isHeading: Boolean(isHeading),
-            frontmatterEndLine: frontmatterEndLine !== undefined ? frontmatterEndLine : -1
+            frontmatterEndLine: frontmatterEndLine !== undefined ? frontmatterEndLine : -1,
+            prevHeading: prevHeading || null,
+            nextHeading: nextHeading || null
         });
     }
 
@@ -502,7 +506,26 @@ export class BotoxPreviewPanel {
       return bestScore > 25 ? bestHeading : null;
     }
 
-    function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine) {
+    function getHeadingPosition(headingText) {
+      if (!headingText || documentHeadings.length === 0) return null;
+      const cleanTarget = headingText.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleanTarget.length < 2) return null;
+
+      const pages = container.querySelectorAll('.page-box');
+      for (const h of documentHeadings) {
+        if (hasToc && h.page_index < firstBodyPage) continue;
+        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleanH === cleanTarget || cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
+          if (h.page_index < pages.length) {
+            const pageBox = pages[h.page_index];
+            return pageBox.offsetTop + (h.y_ratio * pageBox.offsetHeight);
+          }
+        }
+      }
+      return null;
+    }
+
+    function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine, prevHeading, nextHeading) {
       if (!syncScrollEnabled || totalLines <= 1) return;
 
       const pages = container.querySelectorAll('.page-box');
@@ -512,68 +535,66 @@ export class BotoxPreviewPanel {
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
 
+      const halfViewport = container.clientHeight / 2;
+
+      // 1. If cursor is in YAML frontmatter, show top of document
       if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
-        container.scrollTo({
-          top: 0,
-          behavior: 'smooth'
-        });
+        container.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
 
-      const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0)
-        ? frontmatterEndLine + 1
-        : 0;
-      const bodyTotalLines = Math.max(1, totalLines - bodyStartLine);
-      const bodyRatio = Math.min(Math.max((line - bodyStartLine) / (bodyTotalLines - 1), 0), 1);
+      // 2. Interpolate position between enclosing headings
+      let targetY = null;
+      const prevPos = prevHeading ? getHeadingPosition(prevHeading.text) : null;
+      const nextPos = nextHeading ? getHeadingPosition(nextHeading.text) : null;
 
-      // 1. Try matching heading by queryText (if cursor is on heading) or headingText
-      let targetHeading = null;
-      if (isHeading && queryText) {
-        targetHeading = findBestHeading(queryText, bodyRatio, totalPages);
-      }
-      if (!targetHeading && headingText) {
-        targetHeading = findBestHeading(headingText, bodyRatio, totalPages);
-      }
-
-      if (targetHeading && targetHeading.page_index < totalPages) {
-        const pageBox = pages[targetHeading.page_index];
-        const containerRect = container.getBoundingClientRect();
-        const offset = Math.min(containerRect.height * 0.25, 140);
-        const headingTop = pageBox.offsetTop + (targetHeading.y_ratio * pageBox.offsetHeight);
-        const clampedTarget = Math.max(0, Math.min(headingTop - offset, maxScroll));
-        const currentTop = container.scrollTop;
-        const distance = Math.abs(currentTop - clampedTarget);
-
-        container.scrollTo({
-          top: clampedTarget,
-          behavior: distance < 1400 ? 'smooth' : 'auto'
-        });
-        return;
+      if (prevPos !== null && nextPos !== null && nextHeading.line > prevHeading.line) {
+        const frac = Math.min(Math.max((line - prevHeading.line) / (nextHeading.line - prevHeading.line), 0), 1);
+        targetY = prevPos + frac * (nextPos - prevPos);
+      } else if (prevPos !== null) {
+        const remainingLines = Math.max(1, totalLines - 1 - prevHeading.line);
+        const frac = Math.min(Math.max((line - prevHeading.line) / remainingLines, 0), 1);
+        const bottomY = container.scrollHeight;
+        targetY = prevPos + frac * (bottomY - prevPos);
+      } else if (nextPos !== null) {
+        const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0) ? frontmatterEndLine + 1 : 0;
+        const spanLines = Math.max(1, nextHeading.line - bodyStartLine);
+        const frac = Math.min(Math.max((line - bodyStartLine) / spanLines, 0), 1);
+        const effectiveStartPage = hasToc ? firstBodyPage : 0;
+        const topY = pages[effectiveStartPage].offsetTop;
+        targetY = topY + frac * (nextPos - topY);
       }
 
-      // 2. Fallback: Proportional scroll accounting for TOC / frontmatter offset
-      const effectiveStartPage = hasToc ? firstBodyPage : 0;
-      const targetPageFraction = effectiveStartPage + bodyRatio * Math.max(0, totalPages - 1 - effectiveStartPage);
-      const targetPageIdx = Math.min(Math.floor(targetPageFraction), totalPages - 1);
-      const pageRemainder = targetPageFraction - targetPageIdx;
+      // 3. Fallback: Proportional scroll accounting for TOC / frontmatter offset
+      if (targetY === null) {
+        const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0) ? frontmatterEndLine + 1 : 0;
+        const bodyTotalLines = Math.max(1, totalLines - bodyStartLine);
+        const bodyRatio = Math.min(Math.max((line - bodyStartLine) / (bodyTotalLines - 1), 0), 1);
 
-      const pageBox = pages[targetPageIdx];
-      let targetTop = pageBox.offsetTop;
+        const effectiveStartPage = hasToc ? firstBodyPage : 0;
+        const targetPageFraction = effectiveStartPage + bodyRatio * Math.max(0, totalPages - 1 - effectiveStartPage);
+        const targetPageIdx = Math.min(Math.floor(targetPageFraction), totalPages - 1);
+        const pageRemainder = targetPageFraction - targetPageIdx;
 
-      if (pageRemainder > 0 && targetPageIdx < totalPages - 1) {
-        const nextBox = pages[targetPageIdx + 1];
-        targetTop += pageRemainder * (nextBox.offsetTop - pageBox.offsetTop);
-      } else {
-        targetTop += pageRemainder * pageBox.offsetHeight;
+        const pageBox = pages[targetPageIdx];
+        targetY = pageBox.offsetTop;
+        if (pageRemainder > 0 && targetPageIdx < totalPages - 1) {
+          const nextBox = pages[targetPageIdx + 1];
+          targetY += pageRemainder * (nextBox.offsetTop - pageBox.offsetTop);
+        } else {
+          targetY += pageRemainder * pageBox.offsetHeight;
+        }
       }
 
-      const clampedTarget = Math.max(0, Math.min(targetTop - 40, maxScroll));
+      // Centered vertically in viewport!
+      const centeredTarget = targetY - halfViewport;
+      const clampedTarget = Math.max(0, Math.min(centeredTarget, maxScroll));
       const currentTop = container.scrollTop;
       const distance = Math.abs(currentTop - clampedTarget);
 
       container.scrollTo({
         top: clampedTarget,
-        behavior: distance < 1200 ? 'smooth' : 'auto'
+        behavior: distance < 1400 ? 'smooth' : 'auto'
       });
     }
 
@@ -711,7 +732,9 @@ export class BotoxPreviewPanel {
           message.queryText,
           message.headingText,
           message.isHeading,
-          message.frontmatterEndLine
+          message.frontmatterEndLine,
+          message.prevHeading,
+          message.nextHeading
         );
       } else if (message.type === 'setSyncScroll') {
         syncScrollEnabled = Boolean(message.enabled);
