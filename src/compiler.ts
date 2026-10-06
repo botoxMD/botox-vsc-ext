@@ -12,6 +12,14 @@ export interface CompilationResult {
     durationMs?: number;
 }
 
+export interface VectorCompilationResult {
+    success: boolean;
+    pages?: string[];
+    numPages?: number;
+    error?: string;
+    durationMs?: number;
+}
+
 export function resolveBotoxBinary(): string {
     const config = vscode.workspace.getConfiguration('botox');
     const customPath = config.get<string>('executablePath');
@@ -25,6 +33,70 @@ export function resolveBotoxBinary(): string {
     }
 
     return 'botox';
+}
+
+export async function compileForPreview(
+    inputPath: string
+): Promise<VectorCompilationResult> {
+    const binary = resolveBotoxBinary();
+    const startTime = Date.now();
+    const targetOutput = path.join(
+        os.tmpdir(),
+        `botox_preview_${Date.now()}_${process.pid}.json`
+    );
+    const args = [inputPath, '-o', targetOutput];
+    const inputDir = path.dirname(inputPath);
+
+    return new Promise((resolve) => {
+        child_process.execFile(
+            binary,
+            args,
+            { cwd: inputDir, maxBuffer: 50 * 1024 * 1024 },
+            (error, stdout, stderr) => {
+                const durationMs = Date.now() - startTime;
+                if (error) {
+                    const message = stderr || stdout || error.message;
+                    resolve({
+                        success: false,
+                        error: message.trim(),
+                        durationMs
+                    });
+                    return;
+                }
+
+                if (!fs.existsSync(targetOutput)) {
+                    resolve({
+                        success: false,
+                        error: `Preview output '${targetOutput}' was not created. ${stderr}`,
+                        durationMs
+                    });
+                    return;
+                }
+
+                try {
+                    const rawJson = fs.readFileSync(targetOutput, 'utf-8');
+                    try {
+                        fs.unlinkSync(targetOutput);
+                    } catch {
+                        // ignore unlink errors
+                    }
+                    const parsed = JSON.parse(rawJson);
+                    resolve({
+                        success: true,
+                        pages: parsed.pages || [],
+                        numPages: parsed.num_pages || parsed.pages?.length || 0,
+                        durationMs
+                    });
+                } catch (e: any) {
+                    resolve({
+                        success: false,
+                        error: `Failed to parse vector preview: ${e.message}`,
+                        durationMs
+                    });
+                }
+            }
+        );
+    });
 }
 
 export async function compileDocument(

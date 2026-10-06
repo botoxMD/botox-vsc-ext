@@ -1,16 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import { compileDocument, CompilationResult } from './compiler';
+import { compileForPreview, VectorCompilationResult } from './compiler';
 
 export class BotoxPreviewPanel {
     public static currentPanels: Map<string, BotoxPreviewPanel> = new Map();
     private readonly _panel: vscode.WebviewPanel;
     private readonly _documentUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
-    private _lastPdfBase64: string = '';
     private _isCompiling: boolean = false;
     private _pendingCompile: boolean = false;
+    private _htmlInitialized: boolean = false;
 
     public static createOrShow(documentUri: vscode.Uri, viewColumn?: vscode.ViewColumn) {
         const key = documentUri.toString();
@@ -71,20 +70,27 @@ export class BotoxPreviewPanel {
         }
 
         this._isCompiling = true;
-        this._panel.webview.postMessage({ type: 'status', message: 'Compiling with Botox...' });
+        this._panel.webview.postMessage({ type: 'status', message: 'Typesetting with Botox...' });
 
         try {
-            const result: CompilationResult = await compileDocument(this._documentUri.fsPath);
+            const result: VectorCompilationResult = await compileForPreview(this._documentUri.fsPath);
 
-            if (result.success && result.pdfBytes) {
-                const base64 = Buffer.from(result.pdfBytes).toString('base64');
-                this._lastPdfBase64 = base64;
+            if (result.success && result.pages) {
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;
-                this._panel.webview.html = this._getHtmlForWebview(base64, result.durationMs);
+                if (!this._htmlInitialized) {
+                    this._panel.webview.html = this._getHtmlForWebview(result.pages, result.durationMs);
+                    this._htmlInitialized = true;
+                } else {
+                    this._panel.webview.postMessage({
+                        type: 'pages',
+                        pages: result.pages,
+                        durationMs: result.durationMs
+                    });
+                }
             } else {
                 this._panel.webview.postMessage({
                     type: 'error',
-                    message: result.error || 'Unknown compilation error'
+                    message: result.error || 'Compilation failed with unknown error.'
                 });
             }
         } catch (e: any) {
@@ -113,9 +119,10 @@ export class BotoxPreviewPanel {
         }
     }
 
-    private _getHtmlForWebview(pdfBase64: string, durationMs?: number): string {
+    private _getHtmlForWebview(initialPages: string[], durationMs?: number): string {
         const title = path.basename(this._documentUri.fsPath);
         const timingStr = durationMs ? `${durationMs}ms` : '';
+        const pagesJson = JSON.stringify(initialPages);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -123,18 +130,18 @@ export class BotoxPreviewPanel {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Botox Preview: ${title}</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     :root {
       --bg: var(--vscode-editor-background, #1e1e1e);
       --fg: var(--vscode-editor-foreground, #d4d4d4);
       --toolbar-bg: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-      --toolbar-border: var(--vscode-editorGroup-border, #333);
+      --toolbar-border: var(--vscode-editorGroup-border, #333333);
       --btn-bg: var(--vscode-button-secondaryBackground, #3a3d41);
       --btn-fg: var(--vscode-button-secondaryForeground, #ffffff);
       --btn-hover: var(--vscode-button-secondaryHoverBackground, #45494e);
       --badge-bg: var(--vscode-badge-background, #007acc);
       --badge-fg: var(--vscode-badge-foreground, #ffffff);
+      --accent: var(--vscode-focusBorder, #007acc);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -145,17 +152,19 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      user-select: text;
     }
     #toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 12px;
+      padding: 6px 14px;
       background: var(--toolbar-bg);
       border-bottom: 1px solid var(--toolbar-border);
       font-size: 12px;
       user-select: none;
-      z-index: 10;
+      z-index: 100;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
     }
     .tool-group {
       display: flex;
@@ -165,7 +174,7 @@ export class BotoxPreviewPanel {
     button {
       background: var(--btn-bg);
       color: var(--btn-fg);
-      border: none;
+      border: 1px solid transparent;
       padding: 4px 10px;
       border-radius: 3px;
       cursor: pointer;
@@ -173,29 +182,48 @@ export class BotoxPreviewPanel {
       display: flex;
       align-items: center;
       gap: 4px;
+      font-family: inherit;
     }
     button:hover { background: var(--btn-hover); }
+    button.active {
+      border-color: var(--accent);
+      background: var(--btn-hover);
+    }
     .badge {
       background: var(--badge-bg);
       color: var(--badge-fg);
-      padding: 2px 6px;
+      padding: 2px 7px;
       border-radius: 10px;
       font-size: 10px;
-      font-weight: bold;
+      font-weight: 600;
+      letter-spacing: 0.5px;
     }
-    #status {
+    .timing-badge {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--fg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-family: monospace;
+      opacity: 0.85;
+    }
+    #zoom-level {
+      min-width: 44px;
+      text-align: center;
       font-size: 11px;
-      opacity: 0.8;
+      font-variant-numeric: tabular-nums;
     }
     #error-banner {
       display: none;
       background: #7f1d1d;
       color: #fecaca;
-      padding: 8px 12px;
+      padding: 10px 14px;
       font-family: monospace;
       font-size: 12px;
       border-bottom: 1px solid #b91c1c;
       white-space: pre-wrap;
+      max-height: 180px;
+      overflow-y: auto;
     }
     #viewer-container {
       flex: 1;
@@ -204,36 +232,49 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px 10px;
-      gap: 16px;
+      padding: 24px 16px 48px;
+      gap: 20px;
+      scroll-behavior: smooth;
     }
-    .page-container {
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-      border-radius: 2px;
+    .page-box {
       background: #ffffff;
-      margin-bottom: 8px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
+      border-radius: 2px;
+      margin: 0 auto;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: width 0.1s ease-out;
     }
-    canvas {
+    .page-box svg {
+      width: 100% !important;
+      height: auto !important;
       display: block;
+    }
+    .page-indicator {
+      font-size: 11px;
+      opacity: 0.85;
     }
   </style>
 </head>
 <body>
   <div id="toolbar">
     <div class="tool-group">
-      <button id="btn-refresh" title="Reload Preview">↻ Reload</button>
+      <button id="btn-refresh" title="Reload typeset preview">Reload</button>
       <button id="btn-export" title="Compile PDF to file">Export PDF</button>
-      <span class="badge">Botox</span>
+      <span class="badge">Pure Vector</span>
     </div>
     <div class="tool-group">
-      <button id="btn-zoom-out" title="Zoom Out">−</button>
+      <button id="btn-zoom-out" title="Zoom Out (Ctrl -)">−</button>
       <span id="zoom-level">100%</span>
-      <button id="btn-zoom-in" title="Zoom In">+</button>
-      <button id="btn-zoom-fit" title="Fit Width">Fit</button>
+      <button id="btn-zoom-in" title="Zoom In (Ctrl +)">+</button>
+      <button id="btn-zoom-reset" title="Reset Zoom (100%)">100%</button>
+      <button id="btn-zoom-fit" title="Fit to Available Width">Fit Width</button>
     </div>
     <div class="tool-group">
-      <span id="page-info">Pages: ...</span>
-      <span id="timing">${timingStr}</span>
+      <span id="page-info" class="page-indicator">Loading...</span>
+      <span id="timing" class="timing-badge">${timingStr}</span>
     </div>
   </div>
 
@@ -242,74 +283,127 @@ export class BotoxPreviewPanel {
 
   <script>
     const vscode = acquireVsCodeApi();
-    const pdfData = atob("${pdfBase64}");
-    let pdfDoc = null;
-    let currentScale = 1.2;
     const container = document.getElementById('viewer-container');
     const zoomLabel = document.getElementById('zoom-level');
     const pageInfo = document.getElementById('page-info');
+    const timingBadge = document.getElementById('timing');
     const errorBanner = document.getElementById('error-banner');
+    const btnFit = document.getElementById('btn-zoom-fit');
 
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-    async function loadPdf() {
-      try {
-        errorBanner.style.display = 'none';
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-        pdfDoc = await loadingTask.promise;
-        pageInfo.textContent = pdfDoc.numPages + (pdfDoc.numPages === 1 ? ' page' : ' pages');
-        renderAllPages();
-      } catch (err) {
-        showError('PDF rendering failed: ' + err.message);
-      }
-    }
-
-    async function renderAllPages() {
-      if (!pdfDoc) return;
-      container.innerHTML = '';
-      zoomLabel.textContent = Math.round(currentScale * 100) + '%';
-
-      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-        const page = await pdfDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale: currentScale });
-
-        const pageBox = document.createElement('div');
-        pageBox.className = 'page-container';
-        pageBox.id = 'page-' + pageNum;
-
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-
-        pageBox.appendChild(canvas);
-        container.appendChild(pageBox);
-
-        await page.render({
-          canvasContext: context,
-          viewport: viewport
-        }).promise;
-      }
-    }
+    let currentScale = 1.0;
+    let isFitWidth = false;
+    const basePageWidth = 820; // Default reference width for A4 / standard page
 
     function showError(msg) {
       errorBanner.textContent = msg;
       errorBanner.style.display = 'block';
     }
 
+    function hideError() {
+      errorBanner.style.display = 'none';
+      errorBanner.textContent = '';
+    }
+
+    function calculatePageWidth() {
+      if (isFitWidth) {
+        const available = container.clientWidth - 48;
+        return Math.max(available, 280);
+      }
+      return Math.round(basePageWidth * currentScale);
+    }
+
+    function applyScaleToPages() {
+      const targetWidth = calculatePageWidth();
+      const pages = container.querySelectorAll('.page-box');
+      pages.forEach(p => {
+        p.style.width = targetWidth + 'px';
+      });
+
+      if (isFitWidth) {
+        zoomLabel.textContent = 'Fit';
+        btnFit.classList.add('active');
+      } else {
+        zoomLabel.textContent = Math.round(currentScale * 100) + '%';
+        btnFit.classList.remove('active');
+      }
+    }
+
+    function renderPages(pages, durationMs) {
+      hideError();
+      if (durationMs) {
+        timingBadge.textContent = durationMs + 'ms';
+      }
+
+      if (!pages || pages.length === 0) {
+        pageInfo.textContent = '0 pages';
+        container.innerHTML = '<div style="margin-top: 40px; opacity: 0.6;">No content to display.</div>';
+        return;
+      }
+
+      const total = pages.length;
+      pageInfo.textContent = total + (total === 1 ? ' page' : ' pages');
+
+      const targetWidth = calculatePageWidth();
+      container.innerHTML = '';
+
+      for (let i = 0; i < pages.length; i++) {
+        const pageBox = document.createElement('div');
+        pageBox.className = 'page-box';
+        pageBox.id = 'page-' + (i + 1);
+        pageBox.style.width = targetWidth + 'px';
+        pageBox.innerHTML = pages[i];
+        container.appendChild(pageBox);
+      }
+    }
+
+    // Zoom controls
     document.getElementById('btn-zoom-in').addEventListener('click', () => {
-      currentScale = Math.min(currentScale + 0.15, 3.0);
-      renderAllPages();
+      isFitWidth = false;
+      currentScale = Math.min(currentScale + 0.15, 3.5);
+      applyScaleToPages();
     });
 
     document.getElementById('btn-zoom-out').addEventListener('click', () => {
-      currentScale = Math.max(currentScale - 0.15, 0.4);
-      renderAllPages();
+      isFitWidth = false;
+      currentScale = Math.max(currentScale - 0.15, 0.35);
+      applyScaleToPages();
     });
 
-    document.getElementById('btn-zoom-fit').addEventListener('click', () => {
+    document.getElementById('btn-zoom-reset').addEventListener('click', () => {
+      isFitWidth = false;
       currentScale = 1.0;
-      renderAllPages();
+      applyScaleToPages();
+    });
+
+    btnFit.addEventListener('click', () => {
+      isFitWidth = !isFitWidth;
+      applyScaleToPages();
+    });
+
+    window.addEventListener('resize', () => {
+      if (isFitWidth) {
+        applyScaleToPages();
+      }
+    });
+
+    // Keyboard shortcuts in webview
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        isFitWidth = false;
+        currentScale = Math.min(currentScale + 0.15, 3.5);
+        applyScaleToPages();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_')) {
+        e.preventDefault();
+        isFitWidth = false;
+        currentScale = Math.max(currentScale - 0.15, 0.35);
+        applyScaleToPages();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        isFitWidth = false;
+        currentScale = 1.0;
+        applyScaleToPages();
+      }
     });
 
     document.getElementById('btn-refresh').addEventListener('click', () => {
@@ -320,14 +414,21 @@ export class BotoxPreviewPanel {
       vscode.postMessage({ command: 'exportPdf' });
     });
 
+    // Listen for extension messages
     window.addEventListener('message', event => {
       const message = event.data;
-      if (message.type === 'error') {
+      if (message.type === 'pages') {
+        renderPages(message.pages, message.durationMs);
+      } else if (message.type === 'error') {
         showError(message.message);
+      } else if (message.type === 'status') {
+        // Optional subtle status indication
       }
     });
 
-    loadPdf();
+    // Initial render from embedded data
+    const initialPages = ${pagesJson};
+    renderPages(initialPages, ${durationMs || 0});
   </script>
 </body>
 </html>`;
