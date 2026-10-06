@@ -185,8 +185,21 @@ function cleanMarkdownLine(line: string): string {
 
 function getSyncContext(document: vscode.TextDocument, line: number) {
     const totalLines = document.lineCount;
-    const currentLineText = line < totalLines ? document.lineAt(line).text : '';
-    const queryText = cleanMarkdownLine(currentLineText);
+    const currentLineRaw = line < totalLines ? document.lineAt(line).text : '';
+    const currentLineTrimmed = currentLineRaw.trim();
+    const isHeading = currentLineTrimmed.startsWith('#');
+    const queryText = cleanMarkdownLine(currentLineTrimmed);
+
+    // Detect YAML frontmatter boundary if present
+    let frontmatterEndLine = -1;
+    if (totalLines > 0 && document.lineAt(0).text.trim().startsWith('---')) {
+        for (let i = 1; i < totalLines; i++) {
+            if (document.lineAt(i).text.trim().startsWith('---')) {
+                frontmatterEndLine = i;
+                break;
+            }
+        }
+    }
 
     let headingText = '';
     for (let i = Math.min(line, totalLines - 1); i >= 0; i--) {
@@ -200,8 +213,10 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
     return {
         line,
         totalLines,
+        frontmatterEndLine,
         queryText,
-        headingText
+        headingText,
+        isHeading
     };
 }
 
@@ -228,7 +243,14 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         scrollThrottleTimeout = setTimeout(() => {
             scrollThrottleTimeout = undefined;
             const ctx = getSyncContext(editor.document, line);
-            panel.scrollToLine(ctx.line, ctx.totalLines, ctx.queryText, ctx.headingText);
+            panel.scrollToLine(
+                ctx.line,
+                ctx.totalLines,
+                ctx.queryText,
+                ctx.headingText,
+                ctx.isHeading,
+                ctx.frontmatterEndLine
+            );
         }, 40);
     };
 

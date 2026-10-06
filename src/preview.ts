@@ -69,13 +69,22 @@ export class BotoxPreviewPanel {
         this.update();
     }
 
-    public scrollToLine(line: number, totalLines: number, queryText?: string, headingText?: string) {
+    public scrollToLine(
+        line: number,
+        totalLines: number,
+        queryText?: string,
+        headingText?: string,
+        isHeading?: boolean,
+        frontmatterEndLine?: number
+    ) {
         this._panel.webview.postMessage({
             type: 'syncScroll',
             line,
             totalLines,
             queryText,
-            headingText
+            headingText,
+            isHeading: Boolean(isHeading),
+            frontmatterEndLine: frontmatterEndLine !== undefined ? frontmatterEndLine : -1
         });
     }
 
@@ -428,37 +437,83 @@ export class BotoxPreviewPanel {
       });
     }
 
-    function findBestTextElement(query, targetRatio, totalPages) {
+    let hasToc = false;
+    let firstBodyPage = 0;
+
+    function detectDocumentStructure() {
+      const pages = container.querySelectorAll('.page-box');
+      hasToc = false;
+      firstBodyPage = 0;
+
+      for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+        const headings = pages[pIdx].querySelectorAll('text[data-heading="true"]');
+        for (const h of headings) {
+          const hText = (h.textContent || '').trim().toLowerCase();
+          if (/^(contents|table of contents|summary|outline|sommaire|inhalt)$/i.test(hText)) {
+            hasToc = true;
+            break;
+          }
+        }
+        if (hasToc) {
+          for (let nextIdx = pIdx + 1; nextIdx < pages.length; nextIdx++) {
+            const bodyHeadings = pages[nextIdx].querySelectorAll('text[data-heading="true"]');
+            if (bodyHeadings.length > 0) {
+              firstBodyPage = nextIdx;
+              break;
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    function findBestTextElement(query, targetRatio, totalPages, isHeadingQuery) {
       if (!query || query.length < 3) return null;
 
-      const cleanQuery = query.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cleanQuery = query.toLowerCase()
+        .replace(/[\u00ad\u200b]/g, '')
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (cleanQuery.length < 3) return null;
 
       const words = cleanQuery.split(' ').filter(w => w.length >= 3);
       if (words.length === 0) return null;
 
-      const expectedPageIndex = Math.round(targetRatio * (totalPages - 1));
+      const effectiveStartPage = hasToc ? firstBodyPage : 0;
+      const expectedPageIndex = effectiveStartPage + Math.round(targetRatio * Math.max(0, totalPages - 1 - effectiveStartPage));
       const pages = container.querySelectorAll('.page-box');
 
       let bestEl = null;
       let bestScore = -1;
 
       pages.forEach((pageBox, pageIdx) => {
+        const isTocPage = hasToc && (pageIdx < firstBodyPage);
+        if (isHeadingQuery && isTocPage) {
+          return;
+        }
+
         const textElements = pageBox.querySelectorAll('svg text');
         const pageDistance = Math.abs(pageIdx - expectedPageIndex);
-        const pagePenalty = pageDistance * 12;
+        const pagePenalty = pageDistance * 10;
 
         textElements.forEach(el => {
           const elText = el.textContent || '';
-          const cleanEl = elText.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+          const cleanEl = elText.toLowerCase()
+            .replace(/[\u00ad\u200b]/g, '')
+            .replace(/[^\w\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
           if (cleanEl.length < 2) return;
+
+          const isElHeading = el.getAttribute('data-heading') === 'true';
 
           let score = 0;
           if (cleanEl === cleanQuery) {
             score = 100;
           } else if (cleanEl.includes(cleanQuery) || cleanQuery.includes(cleanEl)) {
             const overlap = Math.min(cleanEl.length, cleanQuery.length);
-            score = 60 + Math.min(overlap, 30);
+            score = 70 + Math.min(overlap, 30);
           } else {
             let matchedWords = 0;
             for (const w of words) {
@@ -472,6 +527,21 @@ export class BotoxPreviewPanel {
           }
 
           if (score > 0) {
+            if (isHeadingQuery) {
+              if (isElHeading) {
+                score += 200;
+              } else {
+                score -= 150;
+              }
+            } else {
+              if (isElHeading) {
+                score -= 20;
+              }
+              if (isTocPage) {
+                score -= 80;
+              }
+            }
+
             const finalScore = score - pagePenalty;
             if (finalScore > bestScore) {
               bestScore = finalScore;
@@ -481,41 +551,79 @@ export class BotoxPreviewPanel {
         });
       });
 
-      return bestScore > 20 ? bestEl : null;
+      return bestScore > 25 ? bestEl : null;
     }
 
-    function handleSyncScroll(line, totalLines, queryText, headingText) {
+    function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine) {
       if (!syncScrollEnabled || totalLines <= 1) return;
+
+      const pages = container.querySelectorAll('.page-box');
+      const totalPages = pages.length;
+      if (totalPages === 0) return;
 
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
 
-      const ratio = Math.min(Math.max(line / (totalLines - 1), 0), 1);
-      const pages = container.querySelectorAll('.page-box');
-      const totalPages = pages.length || 1;
-
-      // 1. Try finding exact/best element for current line
-      let targetEl = findBestTextElement(queryText, ratio, totalPages);
-
-      // 2. If not found, try the enclosing heading text
-      if (!targetEl && headingText) {
-        targetEl = findBestTextElement(headingText, ratio, totalPages);
+      if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
+        container.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+        return;
       }
 
-      // 3. If found, scroll right to the element!
+      const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0)
+        ? frontmatterEndLine + 1
+        : 0;
+      const bodyTotalLines = Math.max(1, totalLines - bodyStartLine);
+      const bodyRatio = Math.min(Math.max((line - bodyStartLine) / (bodyTotalLines - 1), 0), 1);
+
+      let targetEl = null;
+
+      // 1. If cursor is on a heading line, search for it with isHeadingQuery = true
+      if (isHeading && queryText) {
+        targetEl = findBestTextElement(queryText, bodyRatio, totalPages, true);
+      }
+
+      // 2. If not heading, search for body text line
+      if (!targetEl && queryText && !isHeading) {
+        targetEl = findBestTextElement(queryText, bodyRatio, totalPages, false);
+      }
+
+      // 3. Fallback to enclosing section heading
+      if (!targetEl && headingText) {
+        targetEl = findBestTextElement(headingText, bodyRatio, totalPages, true);
+      }
+
+      // 4. If found, scroll right to the element!
       if (targetEl) {
         scrollToElement(targetEl);
         return;
       }
 
-      // 4. Fallback to proportional scroll
-      const targetTop = ratio * maxScroll;
+      // 5. Fallback: Proportional scroll accounting for TOC / frontmatter offset
+      const effectiveStartPage = hasToc ? firstBodyPage : 0;
+      const targetPageFraction = effectiveStartPage + bodyRatio * Math.max(0, totalPages - 1 - effectiveStartPage);
+      const targetPageIdx = Math.min(Math.floor(targetPageFraction), totalPages - 1);
+      const pageRemainder = targetPageFraction - targetPageIdx;
+
+      const pageBox = pages[targetPageIdx];
+      let targetTop = pageBox.offsetTop;
+
+      if (pageRemainder > 0 && targetPageIdx < totalPages - 1) {
+        const nextBox = pages[targetPageIdx + 1];
+        targetTop += pageRemainder * (nextBox.offsetTop - pageBox.offsetTop);
+      } else {
+        targetTop += pageRemainder * pageBox.offsetHeight;
+      }
+
+      const clampedTarget = Math.max(0, Math.min(targetTop - 40, maxScroll));
       const currentTop = container.scrollTop;
-      const distance = Math.abs(currentTop - targetTop);
+      const distance = Math.abs(currentTop - clampedTarget);
 
       container.scrollTo({
-        top: targetTop,
-        behavior: distance < 900 ? 'smooth' : 'auto'
+        top: clampedTarget,
+        behavior: distance < 1200 ? 'smooth' : 'auto'
       });
     }
 
@@ -570,6 +678,8 @@ export class BotoxPreviewPanel {
 
         container.appendChild(pageBox);
       }
+
+      detectDocumentStructure();
 
       // Preserve relative reading position after document recompile
       if (prevScrollHeight > 0 && prevScrollTop > 0) {
@@ -642,7 +752,14 @@ export class BotoxPreviewPanel {
       if (message.type === 'pages') {
         renderPages(message.pages, message.durationMs);
       } else if (message.type === 'syncScroll') {
-        handleSyncScroll(message.line, message.totalLines, message.queryText, message.headingText);
+        handleSyncScroll(
+          message.line,
+          message.totalLines,
+          message.queryText,
+          message.headingText,
+          message.isHeading,
+          message.frontmatterEndLine
+        );
       } else if (message.type === 'setSyncScroll') {
         syncScrollEnabled = Boolean(message.enabled);
         updateSyncButtonUI();
