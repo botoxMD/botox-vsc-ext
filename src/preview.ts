@@ -291,7 +291,7 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 24px 16px 48px;
+      padding: 50vh 16px 50vh;
       gap: 20px;
       scroll-behavior: smooth;
     }
@@ -418,7 +418,7 @@ export class BotoxPreviewPanel {
       const elRect = el.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
 
-      const offset = Math.min(containerRect.height * 0.25, 140);
+      const offset = containerRect.height / 2;
       const currentScroll = container.scrollTop;
       const targetScroll = currentScroll + (elRect.top - containerRect.top) - offset;
 
@@ -428,7 +428,7 @@ export class BotoxPreviewPanel {
       const distance = Math.abs(currentScroll - clampedTarget);
       container.scrollTo({
         top: clampedTarget,
-        behavior: distance < 1200 ? 'smooth' : 'auto'
+        behavior: distance < 1400 ? 'smooth' : 'auto'
       });
     }
 
@@ -537,24 +537,24 @@ export class BotoxPreviewPanel {
 
       const halfViewport = container.clientHeight / 2;
 
-      // 1. If cursor is in YAML frontmatter, show top of document
-      if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
-        container.scrollTo({ top: 0, behavior: 'smooth' });
-        return;
-      }
-
-      // 2. Interpolate position between enclosing headings
+      // 1. If cursor is in YAML frontmatter, interpolate over the title block on Page 1
       let targetY = null;
       const prevPos = prevHeading ? getHeadingPosition(prevHeading.text) : null;
       const nextPos = nextHeading ? getHeadingPosition(nextHeading.text) : null;
 
-      if (prevPos !== null && nextPos !== null && nextHeading.line > prevHeading.line) {
+      if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
+        const topPage = pages[0];
+        const fmFrac = Math.min(Math.max(line / Math.max(1, frontmatterEndLine), 0), 1);
+        const titleBlockHeight = topPage.offsetHeight * 0.35;
+        targetY = topPage.offsetTop + fmFrac * titleBlockHeight;
+      } else if (prevPos !== null && nextPos !== null && nextHeading.line > prevHeading.line) {
         const frac = Math.min(Math.max((line - prevHeading.line) / (nextHeading.line - prevHeading.line), 0), 1);
         targetY = prevPos + frac * (nextPos - prevPos);
       } else if (prevPos !== null) {
         const remainingLines = Math.max(1, totalLines - 1 - prevHeading.line);
         const frac = Math.min(Math.max((line - prevHeading.line) / remainingLines, 0), 1);
-        const bottomY = container.scrollHeight;
+        const lastPage = pages[totalPages - 1];
+        const bottomY = lastPage.offsetTop + lastPage.offsetHeight;
         targetY = prevPos + frac * (bottomY - prevPos);
       } else if (nextPos !== null) {
         const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0) ? frontmatterEndLine + 1 : 0;
