@@ -238,18 +238,17 @@ export class BotoxPreviewPanel {
     }
     .page-box {
       background: #ffffff;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
-      border-radius: 2px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+      border-radius: 3px;
       margin: 0 auto;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      transition: width 0.1s ease-out;
+      display: block;
+      position: relative;
+      flex-shrink: 0;
+      transition: width 0.12s ease-out;
     }
     .page-box svg {
       width: 100% !important;
-      height: auto !important;
+      height: 100% !important;
       display: block;
     }
     .page-indicator {
@@ -351,7 +350,28 @@ export class BotoxPreviewPanel {
         pageBox.className = 'page-box';
         pageBox.id = 'page-' + (i + 1);
         pageBox.style.width = targetWidth + 'px';
+
+        // Extract viewBox to guarantee correct page aspect ratio (e.g. A4, Letter, 16:9 slides)
+        const vbMatch = pages[i].match(/viewBox=["']([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)["']/);
+        if (vbMatch) {
+          const vbWidth = parseFloat(vbMatch[3]);
+          const vbHeight = parseFloat(vbMatch[4]);
+          if (vbWidth > 0 && vbHeight > 0) {
+            pageBox.style.aspectRatio = vbWidth + " / " + vbHeight;
+          }
+        }
+
         pageBox.innerHTML = pages[i];
+
+        const svgEl = pageBox.querySelector('svg');
+        if (svgEl) {
+          svgEl.removeAttribute('width');
+          svgEl.removeAttribute('height');
+          svgEl.style.width = '100%';
+          svgEl.style.height = '100%';
+          svgEl.style.display = 'block';
+        }
+
         container.appendChild(pageBox);
       }
     }
