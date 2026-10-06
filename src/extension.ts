@@ -125,6 +125,19 @@ export function activate(context: vscode.ExtensionContext) {
         }
     );
 
+    // 5. Toggle Sync Scroll
+    const toggleSyncScrollCmd = vscode.commands.registerCommand(
+        'botox.toggleSyncScroll',
+        () => {
+            const config = vscode.workspace.getConfiguration('botox');
+            const current = config.get<boolean>('syncScroll', true);
+            config.update('syncScroll', !current, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage(
+                `Botox: Follow Cursor is now ${!current ? 'Enabled' : 'Disabled'}`
+            );
+        }
+    );
+
     // Watch on save
     const onSaveDisposable = vscode.workspace.onDidSaveTextDocument((document) => {
         const config = vscode.workspace.getConfiguration('botox');
@@ -156,13 +169,65 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Follow Cursor & Synchronized Scroll
+    let scrollThrottleTimeout: NodeJS.Timeout | undefined;
+    const syncScrollToPreview = (editor: vscode.TextEditor, line: number) => {
+        const fsPath = editor.document.uri.fsPath;
+        if (!fsPath.endsWith('.md') && !fsPath.endsWith('.markdown')) {
+            return;
+        }
+
+        const panel = BotoxPreviewPanel.currentPanels.get(editor.document.uri.toString());
+        if (!panel) return;
+
+        const config = vscode.workspace.getConfiguration('botox');
+        if (!config.get<boolean>('syncScroll', true)) {
+            return;
+        }
+
+        if (scrollThrottleTimeout) {
+            return;
+        }
+
+        scrollThrottleTimeout = setTimeout(() => {
+            scrollThrottleTimeout = undefined;
+            const totalLines = editor.document.lineCount;
+            panel.scrollToLine(line, totalLines);
+        }, 40);
+    };
+
+    const onSelectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (event.selections.length > 0) {
+            syncScrollToPreview(event.textEditor, event.selections[0].active.line);
+        }
+    });
+
+    const onVisibleRangesChangeDisposable = vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
+        if (event.visibleRanges.length > 0) {
+            syncScrollToPreview(event.textEditor, event.visibleRanges[0].start.line);
+        }
+    });
+
+    const onConfigChangeDisposable = vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('botox.syncScroll')) {
+            const enabled = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
+            BotoxPreviewPanel.currentPanels.forEach(panel => {
+                panel.setSyncScrollEnabled(enabled);
+            });
+        }
+    });
+
     context.subscriptions.push(
         openPreviewCmd,
         compilePdfCmd,
         initDocumentCmd,
         initSlidesCmd,
+        toggleSyncScrollCmd,
         onSaveDisposable,
-        onChangeDisposable
+        onChangeDisposable,
+        onSelectionChangeDisposable,
+        onVisibleRangesChangeDisposable,
+        onConfigChangeDisposable
     );
 }
 

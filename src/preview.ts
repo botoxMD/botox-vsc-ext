@@ -54,6 +54,12 @@ export class BotoxPreviewPanel {
                     case 'exportPdf':
                         vscode.commands.executeCommand('botox.compilePdf', this._documentUri);
                         return;
+                    case 'toggleSyncScroll': {
+                        const config = vscode.workspace.getConfiguration('botox');
+                        const current = config.get<boolean>('syncScroll', true);
+                        config.update('syncScroll', !current, vscode.ConfigurationTarget.Global);
+                        return;
+                    }
                 }
             },
             null,
@@ -61,6 +67,21 @@ export class BotoxPreviewPanel {
         );
 
         this.update();
+    }
+
+    public scrollToLine(line: number, totalLines: number) {
+        this._panel.webview.postMessage({
+            type: 'syncScroll',
+            line,
+            totalLines
+        });
+    }
+
+    public setSyncScrollEnabled(enabled: boolean) {
+        this._panel.webview.postMessage({
+            type: 'setSyncScroll',
+            enabled
+        });
     }
 
     public async update() {
@@ -123,6 +144,7 @@ export class BotoxPreviewPanel {
         const title = path.basename(this._documentUri.fsPath);
         const timingStr = durationMs ? `${durationMs}ms` : '';
         const pagesJson = JSON.stringify(initialPages);
+        const initialSync = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -188,6 +210,12 @@ export class BotoxPreviewPanel {
     button.active {
       border-color: var(--accent);
       background: var(--btn-hover);
+    }
+    button.active-sync {
+      border-color: var(--accent);
+      background: var(--btn-hover);
+      color: #38bdf8;
+      font-weight: 600;
     }
     .badge {
       background: var(--badge-bg);
@@ -265,6 +293,9 @@ export class BotoxPreviewPanel {
       <span class="badge">Pure Vector</span>
     </div>
     <div class="tool-group">
+      <button id="btn-sync" class="${initialSync ? 'active-sync' : ''}" title="Follow active cursor and editor scroll (click to toggle)">
+        Follow Cursor: ${initialSync ? 'ON' : 'OFF'}
+      </button>
       <button id="btn-zoom-out" title="Zoom Out (Ctrl -)">−</button>
       <span id="zoom-level">100%</span>
       <button id="btn-zoom-in" title="Zoom In (Ctrl +)">+</button>
@@ -288,10 +319,30 @@ export class BotoxPreviewPanel {
     const timingBadge = document.getElementById('timing');
     const errorBanner = document.getElementById('error-banner');
     const btnFit = document.getElementById('btn-zoom-fit');
+    const btnSync = document.getElementById('btn-sync');
 
     let currentScale = 1.0;
     let isFitWidth = false;
-    const basePageWidth = 820; // Default reference width for A4 / standard page
+    let syncScrollEnabled = ${initialSync};
+    const basePageWidth = 820;
+
+    function updateSyncButtonUI() {
+      if (syncScrollEnabled) {
+        btnSync.classList.add('active-sync');
+        btnSync.textContent = 'Follow Cursor: ON';
+        btnSync.title = 'Cursor and scroll synchronization is active (click to disable)';
+      } else {
+        btnSync.classList.remove('active-sync');
+        btnSync.textContent = 'Follow Cursor: OFF';
+        btnSync.title = 'Cursor and scroll synchronization is disabled (click to enable)';
+      }
+    }
+
+    btnSync.addEventListener('click', () => {
+      syncScrollEnabled = !syncScrollEnabled;
+      updateSyncButtonUI();
+      vscode.postMessage({ command: 'toggleSyncScroll' });
+    });
 
     function showError(msg) {
       errorBanner.textContent = msg;
@@ -327,6 +378,24 @@ export class BotoxPreviewPanel {
       }
     }
 
+    function handleSyncScroll(line, totalLines) {
+      if (!syncScrollEnabled || totalLines <= 1) return;
+
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      if (maxScroll <= 0) return;
+
+      const ratio = Math.min(Math.max(line / (totalLines - 1), 0), 1);
+      const targetTop = ratio * maxScroll;
+
+      const currentTop = container.scrollTop;
+      const distance = Math.abs(currentTop - targetTop);
+
+      container.scrollTo({
+        top: targetTop,
+        behavior: distance < 900 ? 'smooth' : 'auto'
+      });
+    }
+
     function renderPages(pages, durationMs) {
       hideError();
       if (durationMs) {
@@ -343,6 +412,9 @@ export class BotoxPreviewPanel {
       pageInfo.textContent = total + (total === 1 ? ' page' : ' pages');
 
       const targetWidth = calculatePageWidth();
+      const prevScrollTop = container.scrollTop;
+      const prevScrollHeight = container.scrollHeight;
+
       container.innerHTML = '';
 
       for (let i = 0; i < pages.length; i++) {
@@ -351,7 +423,6 @@ export class BotoxPreviewPanel {
         pageBox.id = 'page-' + (i + 1);
         pageBox.style.width = targetWidth + 'px';
 
-        // Extract viewBox to guarantee correct page aspect ratio (e.g. A4, Letter, 16:9 slides)
         const vbMatch = pages[i].match(/viewBox=["']([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)["']/);
         if (vbMatch) {
           const vbWidth = parseFloat(vbMatch[3]);
@@ -373,6 +444,12 @@ export class BotoxPreviewPanel {
         }
 
         container.appendChild(pageBox);
+      }
+
+      // Preserve relative reading position after document recompile
+      if (prevScrollHeight > 0 && prevScrollTop > 0) {
+        const scrollRatio = prevScrollTop / prevScrollHeight;
+        container.scrollTop = scrollRatio * container.scrollHeight;
       }
     }
 
@@ -439,10 +516,15 @@ export class BotoxPreviewPanel {
       const message = event.data;
       if (message.type === 'pages') {
         renderPages(message.pages, message.durationMs);
+      } else if (message.type === 'syncScroll') {
+        handleSyncScroll(message.line, message.totalLines);
+      } else if (message.type === 'setSyncScroll') {
+        syncScrollEnabled = Boolean(message.enabled);
+        updateSyncButtonUI();
       } else if (message.type === 'error') {
         showError(message.message);
       } else if (message.type === 'status') {
-        // Optional subtle status indication
+        // subtle status update
       }
     });
 
