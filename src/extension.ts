@@ -243,7 +243,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 
     // Follow Cursor & Synchronized Scroll
     let scrollThrottleTimeout: NodeJS.Timeout | undefined;
-    const syncScrollToPreview = (editor: vscode.TextEditor, line: number) => {
+    const syncScrollToPreview = (editor: vscode.TextEditor, line?: number) => {
         const fsPath = editor.document.uri.fsPath;
         if (!fsPath.endsWith('.md') && !fsPath.endsWith('.markdown')) {
             return;
@@ -257,13 +257,15 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
             return;
         }
 
+        const targetLine = line !== undefined ? line : editor.selection.active.line;
+
         if (scrollThrottleTimeout) {
-            return;
+            clearTimeout(scrollThrottleTimeout);
         }
 
         scrollThrottleTimeout = setTimeout(() => {
             scrollThrottleTimeout = undefined;
-            const ctx = getSyncContext(editor.document, line);
+            const ctx = getSyncContext(editor.document, targetLine);
             panel.scrollToLine(
                 ctx.line,
                 ctx.totalLines,
@@ -274,7 +276,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
                 ctx.prevHeading,
                 ctx.nextHeading
             );
-        }, 40);
+        }, 25);
     };
 
     const onSelectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
@@ -285,7 +287,14 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 
     const onVisibleRangesChangeDisposable = vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
         if (event.visibleRanges.length > 0) {
-            syncScrollToPreview(event.textEditor, event.visibleRanges[0].start.line);
+            const cursorLine = event.textEditor.selection.active.line;
+            const range = event.visibleRanges[0];
+            if (cursorLine >= range.start.line && cursorLine <= range.end.line) {
+                syncScrollToPreview(event.textEditor, cursorLine);
+            } else {
+                const midLine = Math.floor((range.start.line + range.end.line) / 2);
+                syncScrollToPreview(event.textEditor, midLine);
+            }
         }
     });
 

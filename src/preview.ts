@@ -512,13 +512,30 @@ export class BotoxPreviewPanel {
       if (cleanTarget.length < 2) return null;
 
       const pages = container.querySelectorAll('.page-box');
+      const containerRect = container.getBoundingClientRect();
+
+      // Priority 1: Exact match
       for (const h of documentHeadings) {
         if (hasToc && h.page_index < firstBodyPage) continue;
         const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-        if (cleanH === cleanTarget || cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
+        if (cleanH === cleanTarget) {
           if (h.page_index < pages.length) {
             const pageBox = pages[h.page_index];
-            return pageBox.offsetTop + (h.y_ratio * pageBox.offsetHeight);
+            const pageTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+            return pageTop + (h.y_ratio * pageBox.offsetHeight);
+          }
+        }
+      }
+
+      // Priority 2: Substring match
+      for (const h of documentHeadings) {
+        if (hasToc && h.page_index < firstBodyPage) continue;
+        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
+          if (h.page_index < pages.length) {
+            const pageBox = pages[h.page_index];
+            const pageTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+            return pageTop + (h.y_ratio * pageBox.offsetHeight);
           }
         }
       }
@@ -532,6 +549,7 @@ export class BotoxPreviewPanel {
       const totalPages = pages.length;
       if (totalPages === 0) return;
 
+      const containerRect = container.getBoundingClientRect();
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
 
@@ -544,24 +562,54 @@ export class BotoxPreviewPanel {
 
       if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
         const topPage = pages[0];
+        const topPageTop = topPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
         const fmFrac = Math.min(Math.max(line / Math.max(1, frontmatterEndLine), 0), 1);
         const titleBlockHeight = topPage.offsetHeight * 0.35;
-        targetY = topPage.offsetTop + fmFrac * titleBlockHeight;
+        targetY = topPageTop + fmFrac * titleBlockHeight;
       } else if (prevPos !== null && nextPos !== null && nextHeading.line > prevHeading.line) {
         const frac = Math.min(Math.max((line - prevHeading.line) / (nextHeading.line - prevHeading.line), 0), 1);
         targetY = prevPos + frac * (nextPos - prevPos);
       } else if (prevPos !== null) {
         const remainingLines = Math.max(1, totalLines - 1 - prevHeading.line);
         const frac = Math.min(Math.max((line - prevHeading.line) / remainingLines, 0), 1);
-        const lastPage = pages[totalPages - 1];
-        const bottomY = lastPage.offsetTop + lastPage.offsetHeight;
-        targetY = prevPos + frac * (bottomY - prevPos);
+
+        // Look for subsequent heading in documentHeadings even if not in .md (e.g. References)
+        let nextDocHeadingPos = null;
+        let foundPrev = false;
+        const cleanTarget = prevHeading.text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+        for (const h of documentHeadings) {
+          if (foundPrev) {
+            if (h.page_index < pages.length) {
+              const pBox = pages[h.page_index];
+              const pTop = pBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+              nextDocHeadingPos = pTop + (h.y_ratio * pBox.offsetHeight);
+            }
+            break;
+          }
+          const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (cleanH === cleanTarget || cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
+            foundPrev = true;
+          }
+        }
+
+        let endY;
+        if (nextDocHeadingPos !== null) {
+          endY = nextDocHeadingPos;
+        } else {
+          const lastPage = pages[totalPages - 1];
+          const lastPageTop = lastPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+          endY = lastPageTop + lastPage.offsetHeight;
+        }
+
+        targetY = prevPos + frac * (endY - prevPos);
       } else if (nextPos !== null) {
         const bodyStartLine = (frontmatterEndLine !== undefined && frontmatterEndLine >= 0) ? frontmatterEndLine + 1 : 0;
         const spanLines = Math.max(1, nextHeading.line - bodyStartLine);
         const frac = Math.min(Math.max((line - bodyStartLine) / spanLines, 0), 1);
         const effectiveStartPage = hasToc ? firstBodyPage : 0;
-        const topY = pages[effectiveStartPage].offsetTop;
+        const firstPage = pages[effectiveStartPage];
+        const topY = firstPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
         targetY = topY + frac * (nextPos - topY);
       }
 
@@ -577,10 +625,12 @@ export class BotoxPreviewPanel {
         const pageRemainder = targetPageFraction - targetPageIdx;
 
         const pageBox = pages[targetPageIdx];
-        targetY = pageBox.offsetTop;
+        const pageBoxTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+        targetY = pageBoxTop;
         if (pageRemainder > 0 && targetPageIdx < totalPages - 1) {
           const nextBox = pages[targetPageIdx + 1];
-          targetY += pageRemainder * (nextBox.offsetTop - pageBox.offsetTop);
+          const nextBoxTop = nextBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+          targetY += pageRemainder * (nextBoxTop - pageBoxTop);
         } else {
           targetY += pageRemainder * pageBox.offsetHeight;
         }
