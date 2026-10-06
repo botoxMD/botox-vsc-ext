@@ -12,9 +12,16 @@ export interface CompilationResult {
     durationMs?: number;
 }
 
+export interface VectorHeadingInfo {
+    page_index: number;
+    text: string;
+    y_ratio: number;
+}
+
 export interface VectorCompilationResult {
     success: boolean;
     pages?: string[];
+    headings?: VectorHeadingInfo[];
     numPages?: number;
     error?: string;
     durationMs?: number;
@@ -102,6 +109,7 @@ export async function compileForPreview(
                 resolve({
                     success: true,
                     pages: parsed.pages || [],
+                    headings: parsed.headings || [],
                     numPages: parsed.num_pages || parsed.pages?.length || 0,
                     durationMs
                 });

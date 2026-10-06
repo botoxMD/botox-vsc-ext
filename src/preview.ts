@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { compileForPreview, VectorCompilationResult } from './compiler';
+import { compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
 
 export class BotoxPreviewPanel {
     public static currentPanels: Map<string, BotoxPreviewPanel> = new Map();
@@ -123,12 +123,13 @@ export class BotoxPreviewPanel {
             if (result.success && result.pages) {
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;
                 if (!this._htmlInitialized) {
-                    this._panel.webview.html = this._getHtmlForWebview(result.pages, result.durationMs);
+                    this._panel.webview.html = this._getHtmlForWebview(result.pages, result.headings || [], result.durationMs);
                     this._htmlInitialized = true;
                 } else {
                     this._panel.webview.postMessage({
                         type: 'pages',
                         pages: result.pages,
+                        headings: result.headings || [],
                         durationMs: result.durationMs
                     });
                 }
@@ -164,10 +165,11 @@ export class BotoxPreviewPanel {
         }
     }
 
-    private _getHtmlForWebview(initialPages: string[], durationMs?: number): string {
+    private _getHtmlForWebview(initialPages: string[], initialHeadings: VectorHeadingInfo[] = [], durationMs?: number): string {
         const title = path.basename(this._documentUri.fsPath);
         const timingStr = durationMs ? `${durationMs}ms` : '';
         const pagesJson = JSON.stringify(initialPages);
+        const headingsJson = JSON.stringify(initialHeadings);
         const initialSync = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
 
         return `<!DOCTYPE html>
@@ -198,7 +200,8 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      user-select: text;
+      user-select: none;
+      -webkit-user-select: none;
     }
     #toolbar {
       display: flex;
@@ -297,31 +300,16 @@ export class BotoxPreviewPanel {
       position: relative;
       flex-shrink: 0;
       transition: width 0.12s ease-out;
-      user-select: text;
-      -webkit-user-select: text;
+      user-select: none;
+      -webkit-user-select: none;
     }
     .page-box svg {
       width: 100% !important;
       height: 100% !important;
       display: block;
-      user-select: text;
-      -webkit-user-select: text;
-    }
-    .page-box svg text {
-      user-select: text;
-      -webkit-user-select: text;
-      cursor: text;
-      fill: transparent !important;
-      fill-opacity: 0 !important;
-      stroke: none !important;
-    }
-    .page-box svg text::selection,
-    .page-box svg *::selection {
-      background: rgba(51, 144, 255, 0.32) !important;
-      fill: transparent !important;
-      fill-opacity: 0 !important;
-      stroke: transparent !important;
-      color: transparent !important;
+      user-select: none;
+      -webkit-user-select: none;
+      pointer-events: none;
     }
     .page-indicator {
       font-size: 11px;
@@ -440,28 +428,22 @@ export class BotoxPreviewPanel {
       });
     }
 
+    let documentHeadings = ${headingsJson};
     let hasToc = false;
     let firstBodyPage = 0;
 
     function detectDocumentStructure() {
-      const pages = container.querySelectorAll('.page-box');
       hasToc = false;
       firstBodyPage = 0;
 
-      for (let pIdx = 0; pIdx < pages.length; pIdx++) {
-        const headings = pages[pIdx].querySelectorAll('text[data-heading="true"]');
-        for (const h of headings) {
-          const hText = (h.textContent || '').trim().toLowerCase();
-          if (/^(contents|table of contents|summary|outline|sommaire|inhalt)$/i.test(hText)) {
-            hasToc = true;
-            break;
-          }
-        }
-        if (hasToc) {
-          for (let nextIdx = pIdx + 1; nextIdx < pages.length; nextIdx++) {
-            const bodyHeadings = pages[nextIdx].querySelectorAll('text[data-heading="true"]');
-            if (bodyHeadings.length > 0) {
-              firstBodyPage = nextIdx;
+      for (let i = 0; i < documentHeadings.length; i++) {
+        const h = documentHeadings[i];
+        const hText = (h.text || '').toLowerCase().trim();
+        if (/^(contents|table of contents|summary|outline|sommaire|inhalt)$/i.test(hText)) {
+          hasToc = true;
+          for (let j = i + 1; j < documentHeadings.length; j++) {
+            if (documentHeadings[j].page_index > h.page_index) {
+              firstBodyPage = documentHeadings[j].page_index;
               break;
             }
           }
@@ -470,91 +452,54 @@ export class BotoxPreviewPanel {
       }
     }
 
-    function findBestTextElement(query, targetRatio, totalPages, isHeadingQuery) {
-      if (!query || query.length < 3) return null;
+    function findBestHeading(query, targetRatio, totalPages) {
+      if (!query || query.length < 3 || documentHeadings.length === 0) return null;
 
-      const cleanQuery = query.toLowerCase()
-        .replace(/[\u00ad\u200b]/g, '')
-        .replace(/[^\w\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const cleanQuery = query.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
       if (cleanQuery.length < 3) return null;
 
       const words = cleanQuery.split(' ').filter(w => w.length >= 3);
-      if (words.length === 0) return null;
-
       const effectiveStartPage = hasToc ? firstBodyPage : 0;
       const expectedPageIndex = effectiveStartPage + Math.round(targetRatio * Math.max(0, totalPages - 1 - effectiveStartPage));
-      const pages = container.querySelectorAll('.page-box');
 
-      let bestEl = null;
+      let bestHeading = null;
       let bestScore = -1;
 
-      pages.forEach((pageBox, pageIdx) => {
-        const isTocPage = hasToc && (pageIdx < firstBodyPage);
-        if (isHeadingQuery && isTocPage) {
-          return;
+      for (const h of documentHeadings) {
+        if (hasToc && h.page_index < firstBodyPage) {
+          continue;
         }
 
-        const textElements = pageBox.querySelectorAll('svg text');
-        const pageDistance = Math.abs(pageIdx - expectedPageIndex);
-        const pagePenalty = pageDistance * 10;
+        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleanH.length < 2) continue;
 
-        textElements.forEach(el => {
-          const elText = el.textContent || '';
-          const cleanEl = elText.toLowerCase()
-            .replace(/[\u00ad\u200b]/g, '')
-            .replace(/[^\w\s]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          if (cleanEl.length < 2) return;
-
-          const isElHeading = el.getAttribute('data-heading') === 'true';
-
-          let score = 0;
-          if (cleanEl === cleanQuery) {
-            score = 100;
-          } else if (cleanEl.includes(cleanQuery) || cleanQuery.includes(cleanEl)) {
-            const overlap = Math.min(cleanEl.length, cleanQuery.length);
-            score = 70 + Math.min(overlap, 30);
-          } else {
-            let matchedWords = 0;
-            for (const w of words) {
-              if (cleanEl.includes(w)) {
-                matchedWords++;
-              }
-            }
-            if (matchedWords > 0) {
-              score = (matchedWords / words.length) * 50;
-            }
+        let score = 0;
+        if (cleanH === cleanQuery) {
+          score = 100;
+        } else if (cleanH.includes(cleanQuery) || cleanQuery.includes(cleanH)) {
+          const overlap = Math.min(cleanH.length, cleanQuery.length);
+          score = 70 + Math.min(overlap, 30);
+        } else if (words.length > 0) {
+          let matched = 0;
+          for (const w of words) {
+            if (cleanH.includes(w)) matched++;
           }
-
-          if (score > 0) {
-            if (isHeadingQuery) {
-              if (isElHeading) {
-                score += 200;
-              } else {
-                score -= 150;
-              }
-            } else {
-              if (isElHeading) {
-                score -= 20;
-              }
-              if (isTocPage) {
-                score -= 80;
-              }
-            }
-
-            const finalScore = score - pagePenalty;
-            if (finalScore > bestScore) {
-              bestScore = finalScore;
-              bestEl = el;
-            }
+          if (matched > 0) {
+            score = (matched / words.length) * 50;
           }
-        });
-      });
+        }
 
-      return bestScore > 25 ? bestEl : null;
+        if (score > 0) {
+          const pageDist = Math.abs(h.page_index - expectedPageIndex);
+          const finalScore = score - pageDist * 10;
+          if (finalScore > bestScore) {
+            bestScore = finalScore;
+            bestHeading = h;
+          }
+        }
+      }
+
+      return bestScore > 25 ? bestHeading : null;
     }
 
     function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine) {
@@ -581,30 +526,32 @@ export class BotoxPreviewPanel {
       const bodyTotalLines = Math.max(1, totalLines - bodyStartLine);
       const bodyRatio = Math.min(Math.max((line - bodyStartLine) / (bodyTotalLines - 1), 0), 1);
 
-      let targetEl = null;
-
-      // 1. If cursor is on a heading line, search for it with isHeadingQuery = true
+      // 1. Try matching heading by queryText (if cursor is on heading) or headingText
+      let targetHeading = null;
       if (isHeading && queryText) {
-        targetEl = findBestTextElement(queryText, bodyRatio, totalPages, true);
+        targetHeading = findBestHeading(queryText, bodyRatio, totalPages);
+      }
+      if (!targetHeading && headingText) {
+        targetHeading = findBestHeading(headingText, bodyRatio, totalPages);
       }
 
-      // 2. If not heading, search for body text line
-      if (!targetEl && queryText && !isHeading) {
-        targetEl = findBestTextElement(queryText, bodyRatio, totalPages, false);
-      }
+      if (targetHeading && targetHeading.page_index < totalPages) {
+        const pageBox = pages[targetHeading.page_index];
+        const containerRect = container.getBoundingClientRect();
+        const offset = Math.min(containerRect.height * 0.25, 140);
+        const headingTop = pageBox.offsetTop + (targetHeading.y_ratio * pageBox.offsetHeight);
+        const clampedTarget = Math.max(0, Math.min(headingTop - offset, maxScroll));
+        const currentTop = container.scrollTop;
+        const distance = Math.abs(currentTop - clampedTarget);
 
-      // 3. Fallback to enclosing section heading
-      if (!targetEl && headingText) {
-        targetEl = findBestTextElement(headingText, bodyRatio, totalPages, true);
-      }
-
-      // 4. If found, scroll right to the element!
-      if (targetEl) {
-        scrollToElement(targetEl);
+        container.scrollTo({
+          top: clampedTarget,
+          behavior: distance < 1400 ? 'smooth' : 'auto'
+        });
         return;
       }
 
-      // 5. Fallback: Proportional scroll accounting for TOC / frontmatter offset
+      // 2. Fallback: Proportional scroll accounting for TOC / frontmatter offset
       const effectiveStartPage = hasToc ? firstBodyPage : 0;
       const targetPageFraction = effectiveStartPage + bodyRatio * Math.max(0, totalPages - 1 - effectiveStartPage);
       const targetPageIdx = Math.min(Math.floor(targetPageFraction), totalPages - 1);
@@ -630,11 +577,15 @@ export class BotoxPreviewPanel {
       });
     }
 
-    function renderPages(pages, durationMs) {
+    function renderPages(pages, headings, durationMs) {
       hideError();
       if (durationMs) {
         timingBadge.textContent = durationMs + 'ms';
       }
+      if (headings) {
+        documentHeadings = headings;
+      }
+      detectDocumentStructure();
 
       if (!pages || pages.length === 0) {
         pageInfo.textContent = '0 pages';
@@ -675,14 +626,13 @@ export class BotoxPreviewPanel {
           svgEl.style.width = '100%';
           svgEl.style.height = '100%';
           svgEl.style.display = 'block';
-          svgEl.style.userSelect = 'text';
-          svgEl.style.webkitUserSelect = 'text';
+          svgEl.style.userSelect = 'none';
+          svgEl.style.webkitUserSelect = 'none';
+          svgEl.style.pointerEvents = 'none';
         }
 
         container.appendChild(pageBox);
       }
-
-      detectDocumentStructure();
 
       // Preserve relative reading position after document recompile
       if (prevScrollHeight > 0 && prevScrollTop > 0) {
@@ -753,7 +703,7 @@ export class BotoxPreviewPanel {
     window.addEventListener('message', event => {
       const message = event.data;
       if (message.type === 'pages') {
-        renderPages(message.pages, message.durationMs);
+        renderPages(message.pages, message.headings || [], message.durationMs);
       } else if (message.type === 'syncScroll') {
         handleSyncScroll(
           message.line,
@@ -775,7 +725,8 @@ export class BotoxPreviewPanel {
 
     // Initial render from embedded data
     const initialPages = ${pagesJson};
-    renderPages(initialPages, ${durationMs || 0});
+    const initialHeadings = ${headingsJson};
+    renderPages(initialPages, initialHeadings, ${durationMs || 0});
   </script>
 </body>
 </html>`;
