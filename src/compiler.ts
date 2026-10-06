@@ -36,7 +36,8 @@ export function resolveBotoxBinary(): string {
 }
 
 export async function compileForPreview(
-    inputPath: string
+    inputPath: string,
+    liveContent?: string
 ): Promise<VectorCompilationResult> {
     const binary = resolveBotoxBinary();
     const startTime = Date.now();
@@ -44,58 +45,79 @@ export async function compileForPreview(
         os.tmpdir(),
         `botox_preview_${Date.now()}_${process.pid}.json`
     );
-    const args = [inputPath, '-o', targetOutput];
     const inputDir = path.dirname(inputPath);
+    const useStdin = typeof liveContent === 'string';
+
+    const args = useStdin
+        ? ['-', '-o', targetOutput, '--resource-dir', inputDir]
+        : [inputPath, '-o', targetOutput];
 
     return new Promise((resolve) => {
-        child_process.execFile(
-            binary,
-            args,
-            { cwd: inputDir, maxBuffer: 50 * 1024 * 1024 },
-            (error, stdout, stderr) => {
-                const durationMs = Date.now() - startTime;
-                if (error) {
-                    const message = stderr || stdout || error.message;
-                    resolve({
-                        success: false,
-                        error: message.trim(),
-                        durationMs
-                    });
-                    return;
-                }
+        const proc = child_process.spawn(binary, args, {
+            cwd: inputDir
+        });
 
-                if (!fs.existsSync(targetOutput)) {
-                    resolve({
-                        success: false,
-                        error: `Preview output '${targetOutput}' was not created. ${stderr}`,
-                        durationMs
-                    });
-                    return;
-                }
+        let stdout = '';
+        let stderr = '';
 
-                try {
-                    const rawJson = fs.readFileSync(targetOutput, 'utf-8');
-                    try {
-                        fs.unlinkSync(targetOutput);
-                    } catch {
-                        // ignore unlink errors
-                    }
-                    const parsed = JSON.parse(rawJson);
-                    resolve({
-                        success: true,
-                        pages: parsed.pages || [],
-                        numPages: parsed.num_pages || parsed.pages?.length || 0,
-                        durationMs
-                    });
-                } catch (e: any) {
-                    resolve({
-                        success: false,
-                        error: `Failed to parse vector preview: ${e.message}`,
-                        durationMs
-                    });
-                }
+        proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+        proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+        proc.on('error', (err: Error) => {
+            resolve({
+                success: false,
+                error: err.message,
+                durationMs: Date.now() - startTime
+            });
+        });
+
+        proc.on('close', (code: number | null) => {
+            const durationMs = Date.now() - startTime;
+            if (code !== 0) {
+                resolve({
+                    success: false,
+                    error: (stderr || stdout || `Process exited with code ${code}`).trim(),
+                    durationMs
+                });
+                return;
             }
-        );
+
+            if (!fs.existsSync(targetOutput)) {
+                resolve({
+                    success: false,
+                    error: `Preview output '${targetOutput}' was not created. ${stderr}`,
+                    durationMs
+                });
+                return;
+            }
+
+            try {
+                const rawJson = fs.readFileSync(targetOutput, 'utf-8');
+                try {
+                    fs.unlinkSync(targetOutput);
+                } catch {
+                    // ignore unlink errors
+                }
+                const parsed = JSON.parse(rawJson);
+                resolve({
+                    success: true,
+                    pages: parsed.pages || [],
+                    numPages: parsed.num_pages || parsed.pages?.length || 0,
+                    durationMs
+                });
+            } catch (e: any) {
+                resolve({
+                    success: false,
+                    error: `Failed to parse vector preview: ${e.message}`,
+                    durationMs
+                });
+            }
+        });
+
+        if (useStdin && proc.stdin) {
+            proc.stdin.write(liveContent);
+            proc.stdin.end();
+        }
     });
 }
 

@@ -84,7 +84,7 @@ export class BotoxPreviewPanel {
         });
     }
 
-    public async update() {
+    public async update(liveContent?: string) {
         if (this._isCompiling) {
             this._pendingCompile = true;
             return;
@@ -94,7 +94,20 @@ export class BotoxPreviewPanel {
         this._panel.webview.postMessage({ type: 'status', message: 'Typesetting with Botox...' });
 
         try {
-            const result: VectorCompilationResult = await compileForPreview(this._documentUri.fsPath);
+            let content = liveContent;
+            if (content === undefined) {
+                const doc = vscode.workspace.textDocuments.find(
+                    d => d.uri.toString() === this._documentUri.toString()
+                );
+                if (doc) {
+                    content = doc.getText();
+                }
+            }
+
+            const result: VectorCompilationResult = await compileForPreview(
+                this._documentUri.fsPath,
+                content
+            );
 
             if (result.success && result.pages) {
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;

@@ -151,10 +151,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // Watch on change (debounced live editing)
+    // Watch on change (debounced live editing before save)
     const onChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
         const config = vscode.workspace.getConfiguration('botox');
-        if (!config.get<boolean>('autoCompileOnChange', false)) {
+        if (!config.get<boolean>('autoCompileOnChange', true)) {
             return;
         }
 
@@ -163,9 +163,10 @@ export function activate(context: vscode.ExtensionContext) {
             if (debounceTimeout) {
                 clearTimeout(debounceTimeout);
             }
+            const delay = config.get<number>('debounceDelay', 350);
             debounceTimeout = setTimeout(() => {
-                panel.update();
-            }, 400);
+                panel.update(event.document.getText());
+            }, delay);
         }
     });
 

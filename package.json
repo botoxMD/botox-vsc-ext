@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -106,8 +106,13 @@
         },
         "botox.autoCompileOnChange": {
           "type": "boolean",
-          "default": false,
-          "description": "Automatically update the live preview on text changes (debounced by 400ms)."
+          "default": true,
+          "description": "Automatically update the live preview on text changes before saving (debounced)."
+        },
+        "botox.debounceDelay": {
+          "type": "number",
+          "default": 350,
+          "description": "Delay in milliseconds to wait after the last keystroke before recompiling the live preview."
         },
         "botox.bibliography": {
           "type": "boolean",
