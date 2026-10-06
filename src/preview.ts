@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
+import { abortActivePreview, compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
 
 export class BotoxPreviewPanel {
     public static currentPanels: Map<string, BotoxPreviewPanel> = new Map();
@@ -104,6 +104,7 @@ export class BotoxPreviewPanel {
         if (this._isCompiling) {
             this._pendingCompile = true;
             this._pendingContent = liveContent;
+            abortActivePreview(this._documentUri.fsPath);
             return;
         }
 
@@ -139,6 +140,9 @@ export class BotoxPreviewPanel {
                         durationMs: result.durationMs
                     });
                 }
+            } else if (result.error && result.error.includes('Aborted:')) {
+                // Aborted because a newer compile was triggered; suppress error
+                return;
             } else {
                 this._panel.webview.postMessage({
                     type: 'error',

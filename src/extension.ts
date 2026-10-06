@@ -163,7 +163,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (debounceTimeout) {
                 clearTimeout(debounceTimeout);
             }
-            const delay = config.get<number>('debounceDelay', 350);
+            const delay = config.get<number>('debounceDelay', 120);
             debounceTimeout = setTimeout(() => {
                 panel.update(event.document.getText());
             }, delay);

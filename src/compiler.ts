@@ -42,10 +42,28 @@ export function resolveBotoxBinary(): string {
     return 'botox';
 }
 
+const activePreviewProcs = new Map<string, child_process.ChildProcess>();
+
+export function abortActivePreview(inputPath: string): boolean {
+    const existing = activePreviewProcs.get(inputPath);
+    if (existing && !existing.killed) {
+        try {
+            existing.kill('SIGTERM');
+        } catch {
+            // ignore kill error
+        }
+        activePreviewProcs.delete(inputPath);
+        return true;
+    }
+    return false;
+}
+
 export async function compileForPreview(
     inputPath: string,
     liveContent?: string
 ): Promise<VectorCompilationResult> {
+    abortActivePreview(inputPath);
+
     const binary = resolveBotoxBinary();
     const startTime = Date.now();
     const targetOutput = path.join(
@@ -63,6 +81,7 @@ export async function compileForPreview(
         const proc = child_process.spawn(binary, args, {
             cwd: inputDir
         });
+        activePreviewProcs.set(inputPath, proc);
 
         let stdout = '';
         let stderr = '';
@@ -71,6 +90,9 @@ export async function compileForPreview(
         proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
         proc.on('error', (err: Error) => {
+            if (activePreviewProcs.get(inputPath) === proc) {
+                activePreviewProcs.delete(inputPath);
+            }
             resolve({
                 success: false,
                 error: err.message,
@@ -79,7 +101,25 @@ export async function compileForPreview(
         });
 
         proc.on('close', (code: number | null) => {
+            if (activePreviewProcs.get(inputPath) === proc) {
+                activePreviewProcs.delete(inputPath);
+            }
             const durationMs = Date.now() - startTime;
+
+            if (proc.killed) {
+                try {
+                    if (fs.existsSync(targetOutput)) fs.unlinkSync(targetOutput);
+                } catch {
+                    // ignore
+                }
+                resolve({
+                    success: false,
+                    error: 'Aborted: newer keystroke received',
+                    durationMs
+                });
+                return;
+            }
+
             if (code !== 0) {
                 resolve({
                     success: false,
