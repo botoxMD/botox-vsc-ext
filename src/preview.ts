@@ -311,14 +311,17 @@ export class BotoxPreviewPanel {
       user-select: text;
       -webkit-user-select: text;
       cursor: text;
+      fill: transparent !important;
+      fill-opacity: 0 !important;
+      stroke: none !important;
     }
-    .page-box svg text::selection {
-      background: rgba(0, 122, 204, 0.35);
-      fill: #007acc;
-      fill-opacity: 0.2;
-    }
+    .page-box svg text::selection,
     .page-box svg *::selection {
-      background: rgba(0, 122, 204, 0.35);
+      background: rgba(51, 144, 255, 0.32) !important;
+      fill: transparent !important;
+      fill-opacity: 0 !important;
+      stroke: transparent !important;
+      color: transparent !important;
     }
     .page-indicator {
       font-size: 11px;
