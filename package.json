@@ -1,0 +1,138 @@
+{
+  "name": "botox",
+  "displayName": "Botox - Markdown Preview & Typesetting",
+  "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
+  "version": "0.1.0",
+  "publisher": "botoxMD",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/botoxMD/botox-vsc-ext.git"
+  },
+  "bugs": {
+    "url": "https://github.com/botoxMD/botox-vsc-ext/issues"
+  },
+  "homepage": "https://github.com/botoxMD/botox-vsc-ext#readme",
+  "categories": [
+    "Formatters",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "botox",
+    "markdown",
+    "latex",
+    "typesetting",
+    "pdf",
+    "typst",
+    "slides",
+    "preview"
+  ],
+  "main": "./out/extension.js",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "botox.openPreview",
+        "title": "Botox: Open Preview to the Side",
+        "category": "Botox",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "botox.compilePdf",
+        "title": "Botox: Compile to PDF",
+        "category": "Botox",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "botox.initDocument",
+        "title": "Botox: Initialize New Document (botox init)",
+        "category": "Botox"
+      },
+      {
+        "command": "botox.initSlides",
+        "title": "Botox: Initialize Presentation Slides (botox init)",
+        "category": "Botox"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "botox.openPreview",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@1"
+        },
+        {
+          "command": "botox.compilePdf",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "botox.openPreview",
+          "when": "resourceLangId == markdown"
+        },
+        {
+          "command": "botox.compilePdf",
+          "when": "resourceLangId == markdown"
+        },
+        {
+          "command": "botox.initDocument"
+        },
+        {
+          "command": "botox.initSlides"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "botox.openPreview",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "editorTextFocus && editorLangId == markdown"
+      }
+    ],
+    "configuration": {
+      "title": "Botox",
+      "properties": {
+        "botox.executablePath": {
+          "type": "string",
+          "default": "botox",
+          "description": "Path to the botox CLI executable (defaults to 'botox' on PATH, or ~/.local/bin/botox)."
+        },
+        "botox.autoCompileOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically recompile the preview when saving the active Markdown document."
+        },
+        "botox.autoCompileOnChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically update the live preview on text changes (debounced by 400ms)."
+        },
+        "botox.bibliography": {
+          "type": "boolean",
+          "default": true,
+          "description": "Transform web links into an automatic IEEE-standard bibliography in documents."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}
