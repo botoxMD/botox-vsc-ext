@@ -9,6 +9,7 @@ export class BotoxPreviewPanel {
     private _disposables: vscode.Disposable[] = [];
     private _isCompiling: boolean = false;
     private _pendingCompile: boolean = false;
+    private _pendingContent?: string;
     private _htmlInitialized: boolean = false;
 
     public static createOrShow(documentUri: vscode.Uri, viewColumn?: vscode.ViewColumn) {
@@ -102,6 +103,7 @@ export class BotoxPreviewPanel {
     public async update(liveContent?: string) {
         if (this._isCompiling) {
             this._pendingCompile = true;
+            this._pendingContent = liveContent;
             return;
         }
 
@@ -152,7 +154,9 @@ export class BotoxPreviewPanel {
             this._isCompiling = false;
             if (this._pendingCompile) {
                 this._pendingCompile = false;
-                this.update();
+                const nextContent = this._pendingContent;
+                this._pendingContent = undefined;
+                this.update(nextContent);
             }
         }
     }
@@ -398,6 +402,22 @@ export class BotoxPreviewPanel {
       return Math.round(basePageWidth * currentScale);
     }
 
+    let cachedPageMetrics = [];
+    let renderedPageSvgs = [];
+
+    function updatePageMetrics() {
+      const containerRect = container.getBoundingClientRect();
+      const pages = container.querySelectorAll('.page-box');
+      cachedPageMetrics = [];
+      for (let i = 0; i < pages.length; i++) {
+        const r = pages[i].getBoundingClientRect();
+        cachedPageMetrics.push({
+          top: r.top - containerRect.top + container.scrollTop,
+          height: pages[i].offsetHeight || r.height
+        });
+      }
+    }
+
     function applyScaleToPages() {
       const targetWidth = calculatePageWidth();
       const pages = container.querySelectorAll('.page-box');
@@ -412,6 +432,8 @@ export class BotoxPreviewPanel {
         zoomLabel.textContent = Math.round(currentScale * 100) + '%';
         btnFit.classList.remove('active');
       }
+
+      updatePageMetrics();
     }
 
     function scrollToElement(el) {
@@ -507,22 +529,18 @@ export class BotoxPreviewPanel {
     }
 
     function getHeadingPosition(headingText) {
-      if (!headingText || documentHeadings.length === 0) return null;
+      if (!headingText || documentHeadings.length === 0 || cachedPageMetrics.length === 0) return null;
       const cleanTarget = headingText.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
       if (cleanTarget.length < 2) return null;
-
-      const pages = container.querySelectorAll('.page-box');
-      const containerRect = container.getBoundingClientRect();
 
       // Priority 1: Exact match
       for (const h of documentHeadings) {
         if (hasToc && h.page_index < firstBodyPage) continue;
         const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
         if (cleanH === cleanTarget) {
-          if (h.page_index < pages.length) {
-            const pageBox = pages[h.page_index];
-            const pageTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-            return pageTop + (h.y_ratio * pageBox.offsetHeight);
+          if (h.page_index < cachedPageMetrics.length) {
+            const m = cachedPageMetrics[h.page_index];
+            return m.top + (h.y_ratio * m.height);
           }
         }
       }
@@ -532,10 +550,9 @@ export class BotoxPreviewPanel {
         if (hasToc && h.page_index < firstBodyPage) continue;
         const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
         if (cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
-          if (h.page_index < pages.length) {
-            const pageBox = pages[h.page_index];
-            const pageTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-            return pageTop + (h.y_ratio * pageBox.offsetHeight);
+          if (h.page_index < cachedPageMetrics.length) {
+            const m = cachedPageMetrics[h.page_index];
+            return m.top + (h.y_ratio * m.height);
           }
         }
       }
@@ -545,11 +562,12 @@ export class BotoxPreviewPanel {
     function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine, prevHeading, nextHeading) {
       if (!syncScrollEnabled || totalLines <= 1) return;
 
-      const pages = container.querySelectorAll('.page-box');
-      const totalPages = pages.length;
+      if (cachedPageMetrics.length === 0) {
+        updatePageMetrics();
+      }
+      const totalPages = cachedPageMetrics.length;
       if (totalPages === 0) return;
 
-      const containerRect = container.getBoundingClientRect();
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
 
@@ -561,11 +579,10 @@ export class BotoxPreviewPanel {
       const nextPos = nextHeading ? getHeadingPosition(nextHeading.text) : null;
 
       if (frontmatterEndLine !== undefined && frontmatterEndLine >= 0 && line <= frontmatterEndLine) {
-        const topPage = pages[0];
-        const topPageTop = topPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
+        const topPage = cachedPageMetrics[0];
         const fmFrac = Math.min(Math.max(line / Math.max(1, frontmatterEndLine), 0), 1);
-        const titleBlockHeight = topPage.offsetHeight * 0.35;
-        targetY = topPageTop + fmFrac * titleBlockHeight;
+        const titleBlockHeight = topPage.height * 0.35;
+        targetY = topPage.top + fmFrac * titleBlockHeight;
       } else if (prevPos !== null && nextPos !== null && nextHeading.line > prevHeading.line) {
         const frac = Math.min(Math.max((line - prevHeading.line) / (nextHeading.line - prevHeading.line), 0), 1);
         targetY = prevPos + frac * (nextPos - prevPos);
@@ -580,10 +597,9 @@ export class BotoxPreviewPanel {
 
         for (const h of documentHeadings) {
           if (foundPrev) {
-            if (h.page_index < pages.length) {
-              const pBox = pages[h.page_index];
-              const pTop = pBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-              nextDocHeadingPos = pTop + (h.y_ratio * pBox.offsetHeight);
+            if (h.page_index < cachedPageMetrics.length) {
+              const m = cachedPageMetrics[h.page_index];
+              nextDocHeadingPos = m.top + (h.y_ratio * m.height);
             }
             break;
           }
@@ -597,9 +613,8 @@ export class BotoxPreviewPanel {
         if (nextDocHeadingPos !== null) {
           endY = nextDocHeadingPos;
         } else {
-          const lastPage = pages[totalPages - 1];
-          const lastPageTop = lastPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-          endY = lastPageTop + lastPage.offsetHeight;
+          const lastPage = cachedPageMetrics[totalPages - 1];
+          endY = lastPage.top + lastPage.height;
         }
 
         targetY = prevPos + frac * (endY - prevPos);
@@ -608,9 +623,8 @@ export class BotoxPreviewPanel {
         const spanLines = Math.max(1, nextHeading.line - bodyStartLine);
         const frac = Math.min(Math.max((line - bodyStartLine) / spanLines, 0), 1);
         const effectiveStartPage = hasToc ? firstBodyPage : 0;
-        const firstPage = pages[effectiveStartPage];
-        const topY = firstPage.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-        targetY = topY + frac * (nextPos - topY);
+        const firstPage = cachedPageMetrics[effectiveStartPage] || cachedPageMetrics[0];
+        targetY = firstPage.top + frac * (nextPos - firstPage.top);
       }
 
       // 3. Fallback: Proportional scroll accounting for TOC / frontmatter offset
@@ -624,15 +638,13 @@ export class BotoxPreviewPanel {
         const targetPageIdx = Math.min(Math.floor(targetPageFraction), totalPages - 1);
         const pageRemainder = targetPageFraction - targetPageIdx;
 
-        const pageBox = pages[targetPageIdx];
-        const pageBoxTop = pageBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-        targetY = pageBoxTop;
+        const pageBox = cachedPageMetrics[targetPageIdx];
+        targetY = pageBox.top;
         if (pageRemainder > 0 && targetPageIdx < totalPages - 1) {
-          const nextBox = pages[targetPageIdx + 1];
-          const nextBoxTop = nextBox.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-          targetY += pageRemainder * (nextBoxTop - pageBoxTop);
+          const nextBox = cachedPageMetrics[targetPageIdx + 1];
+          targetY += pageRemainder * (nextBox.top - pageBox.top);
         } else {
-          targetY += pageRemainder * pageBox.offsetHeight;
+          targetY += pageRemainder * pageBox.height;
         }
       }
 
@@ -648,6 +660,35 @@ export class BotoxPreviewPanel {
       });
     }
 
+    function setupPageBox(pageBox, svgContent, i, targetWidth) {
+      pageBox.className = 'page-box';
+      pageBox.id = 'page-' + (i + 1);
+      pageBox.style.width = targetWidth + 'px';
+
+      const vbMatch = svgContent.match(/viewBox=["']([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)["']/);
+      if (vbMatch) {
+        const vbWidth = parseFloat(vbMatch[3]);
+        const vbHeight = parseFloat(vbMatch[4]);
+        if (vbWidth > 0 && vbHeight > 0) {
+          pageBox.style.aspectRatio = vbWidth + " / " + vbHeight;
+        }
+      }
+
+      pageBox.innerHTML = svgContent;
+
+      const svgEl = pageBox.querySelector('svg');
+      if (svgEl) {
+        svgEl.removeAttribute('width');
+        svgEl.removeAttribute('height');
+        svgEl.style.width = '100%';
+        svgEl.style.height = '100%';
+        svgEl.style.display = 'block';
+        svgEl.style.userSelect = 'none';
+        svgEl.style.webkitUserSelect = 'none';
+        svgEl.style.pointerEvents = 'none';
+      }
+    }
+
     function renderPages(pages, headings, durationMs) {
       hideError();
       if (durationMs) {
@@ -661,6 +702,8 @@ export class BotoxPreviewPanel {
       if (!pages || pages.length === 0) {
         pageInfo.textContent = '0 pages';
         container.innerHTML = '<div style="margin-top: 40px; opacity: 0.6;">No content to display.</div>';
+        renderedPageSvgs = [];
+        cachedPageMetrics = [];
         return;
       }
 
@@ -671,42 +714,41 @@ export class BotoxPreviewPanel {
       const prevScrollTop = container.scrollTop;
       const prevScrollHeight = container.scrollHeight;
 
-      container.innerHTML = '';
-
-      for (let i = 0; i < pages.length; i++) {
-        const pageBox = document.createElement('div');
-        pageBox.className = 'page-box';
-        pageBox.id = 'page-' + (i + 1);
-        pageBox.style.width = targetWidth + 'px';
-
-        const vbMatch = pages[i].match(/viewBox=["']([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)["']/);
-        if (vbMatch) {
-          const vbWidth = parseFloat(vbMatch[3]);
-          const vbHeight = parseFloat(vbMatch[4]);
-          if (vbWidth > 0 && vbHeight > 0) {
-            pageBox.style.aspectRatio = vbWidth + " / " + vbHeight;
-          }
-        }
-
-        pageBox.innerHTML = pages[i];
-
-        const svgEl = pageBox.querySelector('svg');
-        if (svgEl) {
-          svgEl.removeAttribute('width');
-          svgEl.removeAttribute('height');
-          svgEl.style.width = '100%';
-          svgEl.style.height = '100%';
-          svgEl.style.display = 'block';
-          svgEl.style.userSelect = 'none';
-          svgEl.style.webkitUserSelect = 'none';
-          svgEl.style.pointerEvents = 'none';
-        }
-
-        container.appendChild(pageBox);
+      const existingBoxes = Array.from(container.children).filter(c => c.classList && c.classList.contains('page-box'));
+      if (existingBoxes.length !== container.children.length) {
+        container.innerHTML = '';
+        existingBoxes.length = 0;
+        renderedPageSvgs = [];
       }
 
-      // Preserve relative reading position after document recompile
-      if (prevScrollHeight > 0 && prevScrollTop > 0) {
+      while (existingBoxes.length > pages.length) {
+        const last = existingBoxes.pop();
+        if (last) last.remove();
+      }
+
+      for (let i = 0; i < pages.length; i++) {
+        if (i < existingBoxes.length) {
+          const box = existingBoxes[i];
+          if (renderedPageSvgs[i] !== pages[i]) {
+            setupPageBox(box, pages[i], i, targetWidth);
+            renderedPageSvgs[i] = pages[i];
+          } else {
+            box.style.width = targetWidth + 'px';
+          }
+        } else {
+          const newBox = document.createElement('div');
+          setupPageBox(newBox, pages[i], i, targetWidth);
+          container.appendChild(newBox);
+          existingBoxes.push(newBox);
+          renderedPageSvgs[i] = pages[i];
+        }
+      }
+      renderedPageSvgs.length = pages.length;
+
+      updatePageMetrics();
+
+      // Preserve relative reading position if total height shifted
+      if (prevScrollHeight > 0 && prevScrollTop > 0 && Math.abs(container.scrollHeight - prevScrollHeight) > 10) {
         const scrollRatio = prevScrollTop / prevScrollHeight;
         container.scrollTop = scrollRatio * container.scrollHeight;
       }
@@ -739,6 +781,8 @@ export class BotoxPreviewPanel {
     window.addEventListener('resize', () => {
       if (isFitWidth) {
         applyScaleToPages();
+      } else {
+        updatePageMetrics();
       }
     });
 

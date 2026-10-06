@@ -190,10 +190,11 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
     const isHeading = currentLineTrimmed.startsWith('#');
     const queryText = cleanMarkdownLine(currentLineTrimmed);
 
-    // Detect YAML frontmatter boundary if present
+    // Detect YAML frontmatter boundary if present (only check top lines)
     let frontmatterEndLine = -1;
     if (totalLines > 0 && document.lineAt(0).text.trim().startsWith('---')) {
-        for (let i = 1; i < totalLines; i++) {
+        const searchLimit = Math.min(totalLines, 200);
+        for (let i = 1; i < searchLimit; i++) {
             if (document.lineAt(i).text.trim().startsWith('---')) {
                 frontmatterEndLine = i;
                 break;
@@ -201,19 +202,10 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         }
     }
 
-    let headingText = '';
-    for (let i = Math.min(line, totalLines - 1); i >= 0; i--) {
-        const text = document.lineAt(i).text.trim();
-        if (text.startsWith('#')) {
-            headingText = cleanMarkdownLine(text);
-            break;
-        }
-    }
-
     let prevHeading: { text: string; line: number } | null = null;
     let nextHeading: { text: string; line: number } | null = null;
 
-    for (let i = line; i >= 0; i--) {
+    for (let i = Math.min(line, totalLines - 1); i >= 0; i--) {
         const text = document.lineAt(i).text.trim();
         if (text.startsWith('#')) {
             prevHeading = { text: cleanMarkdownLine(text), line: i };
@@ -228,6 +220,8 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
             break;
         }
     }
+
+    const headingText = prevHeading ? prevHeading.text : '';
 
     return {
         line,
