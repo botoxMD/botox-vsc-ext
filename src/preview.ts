@@ -286,11 +286,28 @@ export class BotoxPreviewPanel {
       position: relative;
       flex-shrink: 0;
       transition: width 0.12s ease-out;
+      user-select: text;
+      -webkit-user-select: text;
     }
     .page-box svg {
       width: 100% !important;
       height: 100% !important;
       display: block;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    .page-box svg text {
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
+    }
+    .page-box svg text::selection {
+      background: rgba(0, 122, 204, 0.35);
+      fill: #007acc;
+      fill-opacity: 0.2;
+    }
+    .page-box svg *::selection {
+      background: rgba(0, 122, 204, 0.35);
     }
     .page-indicator {
       font-size: 11px;
@@ -454,6 +471,8 @@ export class BotoxPreviewPanel {
           svgEl.style.width = '100%';
           svgEl.style.height = '100%';
           svgEl.style.display = 'block';
+          svgEl.style.userSelect = 'text';
+          svgEl.style.webkitUserSelect = 'text';
         }
 
         container.appendChild(pageBox);
