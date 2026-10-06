@@ -33,30 +33,34 @@
     "vscode": "^1.85.0"
   },
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onCommand:botox.openPreview",
+    "onCommand:botox.compilePdf",
+    "onCommand:botox.initDocument",
+    "onCommand:botox.initSlides"
   ],
   "contributes": {
     "commands": [
       {
         "command": "botox.openPreview",
-        "title": "Botox: Open Preview to the Side",
+        "title": "Open Live PDF Preview",
         "category": "Botox",
         "icon": "$(open-preview)"
       },
       {
         "command": "botox.compilePdf",
-        "title": "Botox: Compile to PDF",
+        "title": "Compile to PDF",
         "category": "Botox",
         "icon": "$(file-pdf)"
       },
       {
         "command": "botox.initDocument",
-        "title": "Botox: Initialize New Document (botox init)",
+        "title": "Initialize New Document",
         "category": "Botox"
       },
       {
         "command": "botox.initSlides",
-        "title": "Botox: Initialize Presentation Slides (botox init)",
+        "title": "Initialize Slide Deck",
         "category": "Botox"
       }
     ],
@@ -64,29 +68,13 @@
       "editor/title": [
         {
           "command": "botox.openPreview",
-          "when": "resourceLangId == markdown",
+          "when": "resourceLangId == markdown || editorLangId == markdown",
           "group": "navigation@1"
         },
         {
           "command": "botox.compilePdf",
-          "when": "resourceLangId == markdown",
+          "when": "resourceLangId == markdown || editorLangId == markdown",
           "group": "navigation@2"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "botox.openPreview",
-          "when": "resourceLangId == markdown"
-        },
-        {
-          "command": "botox.compilePdf",
-          "when": "resourceLangId == markdown"
-        },
-        {
-          "command": "botox.initDocument"
-        },
-        {
-          "command": "botox.initSlides"
         }
       ]
     },
