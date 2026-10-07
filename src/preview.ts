@@ -1520,7 +1520,11 @@ export class BotoxPreviewPanel {
     }
 
     let currentPageIndex = 0;
-    let isSlideMode = false;
+    let isSlideMode = ${isSlides ? 'true' : 'false'};
+    if (isSlideMode) {
+      if (btnSlideMode) btnSlideMode.classList.add('active');
+      container.classList.add('slide-mode');
+    }
 
     function setupPageBox(pageBox, svgContent, i, targetWidth) {
       pageBox.className = 'page-box';
@@ -1856,12 +1860,23 @@ export class BotoxPreviewPanel {
     window.addEventListener('message', event => {
       const message = event.data;
       if (message.type === 'pages') {
-        renderPages(message.pages, message.headings || [], message.durationMs);
         if (typeof message.isSlides === 'boolean') {
           renderThemeOptions(message.isSlides, message.activeTheme);
+          if (message.isSlides && !isSlideMode) {
+            isSlideMode = true;
+            if (btnSlideMode) btnSlideMode.classList.add('active');
+            container.classList.add('slide-mode');
+          } else if (message.isSlides === false && isSlideMode) {
+            isSlideMode = false;
+            if (btnSlideMode) btnSlideMode.classList.remove('active');
+            container.classList.remove('slide-mode');
+            const pages = container.querySelectorAll('.page-box');
+            pages.forEach(p => p.classList.remove('active-slide'));
+          }
         } else if (message.activeTheme && themeSelect) {
           themeSelect.value = message.activeTheme;
         }
+        renderPages(message.pages, message.headings || [], message.durationMs);
         if (message.activeTheme) {
           const state = vscode.getState() || {};
           vscode.setState({ ...state, docTheme: message.activeTheme });
