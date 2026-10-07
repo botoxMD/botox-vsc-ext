@@ -342,17 +342,99 @@ export class BotoxPreviewPanel {
       --bg: var(--vscode-editor-background, #1e1e1e);
       --fg: var(--vscode-editor-foreground, #d4d4d4);
       --toolbar-bg: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-      --toolbar-border: var(--vscode-editorGroup-border, #333333);
-      --btn-bg: var(--vscode-button-secondaryBackground, #3a3d41);
-      --btn-fg: var(--vscode-button-secondaryForeground, #ffffff);
-      --btn-hover: var(--vscode-button-secondaryHoverBackground, #45494e);
-      --badge-bg: var(--vscode-badge-background, #007acc);
-      --badge-fg: var(--vscode-badge-foreground, #ffffff);
-      --accent: var(--vscode-focusBorder, #007acc);
+      --toolbar-border: var(--vscode-editorGroup-border, rgba(255, 255, 255, 0.08));
+      --btn-bg: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.07));
+      --btn-fg: var(--vscode-button-secondaryForeground, #e2e8f0);
+      --btn-hover: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.14));
+      --accent: var(--vscode-focusBorder, #38bdf8);
+      --canvas-bg: var(--bg);
+      --page-bg: #ffffff;
+      --page-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+      --page-border: rgba(0, 0, 0, 0.08);
+      --svg-filter: none;
     }
+
+    body[data-theme="auto"] {
+      --canvas-bg: var(--vscode-editor-background, #1e1e1e);
+      --page-bg: #ffffff;
+      --page-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+      --page-border: rgba(255, 255, 255, 0.06);
+      --svg-filter: none;
+    }
+
+    body[data-theme="light"] {
+      --canvas-bg: #f1f5f9;
+      --toolbar-bg: #ffffff;
+      --toolbar-border: #e2e8f0;
+      --fg: #1e293b;
+      --btn-bg: #f8fafc;
+      --btn-fg: #334155;
+      --btn-hover: #e2e8f0;
+      --page-bg: #ffffff;
+      --page-shadow: 0 12px 36px rgba(15, 23, 42, 0.12);
+      --page-border: #cbd5e1;
+      --svg-filter: none;
+    }
+
+    body[data-theme="warm"] {
+      --canvas-bg: #f4efe4;
+      --toolbar-bg: #ede5d5;
+      --toolbar-border: #ddcfba;
+      --fg: #382f25;
+      --btn-bg: #faf5eb;
+      --btn-fg: #453b2f;
+      --btn-hover: #e4d8c3;
+      --page-bg: #fcf8f0;
+      --page-shadow: 0 12px 36px rgba(90, 65, 40, 0.15);
+      --page-border: #e2d4bc;
+      --svg-filter: sepia(0.32) contrast(0.98);
+    }
+
+    body[data-theme="dark"] {
+      --canvas-bg: #0f172a;
+      --toolbar-bg: #1e293b;
+      --toolbar-border: #334155;
+      --fg: #f8fafc;
+      --btn-bg: #334155;
+      --btn-fg: #f8fafc;
+      --btn-hover: #475569;
+      --page-bg: #1e293b;
+      --page-shadow: 0 14px 44px rgba(0, 0, 0, 0.65);
+      --page-border: rgba(255, 255, 255, 0.08);
+      --svg-filter: invert(0.88) hue-rotate(180deg);
+    }
+
+    body[data-theme="nord"] {
+      --canvas-bg: #242933;
+      --toolbar-bg: #2e3440;
+      --toolbar-border: #434c5e;
+      --fg: #eceff4;
+      --btn-bg: #3b4252;
+      --btn-fg: #eceff4;
+      --btn-hover: #4c566a;
+      --page-bg: #2e3440;
+      --page-shadow: 0 14px 44px rgba(0, 0, 0, 0.6);
+      --page-border: #4c566a;
+      --svg-filter: invert(0.86) hue-rotate(190deg) brightness(1.04);
+    }
+
+    body[data-theme="oled"] {
+      --canvas-bg: #000000;
+      --toolbar-bg: #0d0d0d;
+      --toolbar-border: #222222;
+      --fg: #ffffff;
+      --btn-bg: #181818;
+      --btn-fg: #ffffff;
+      --btn-hover: #282828;
+      --page-bg: #0a0a0a;
+      --page-shadow: 0 0 0 1px #2a2a2a;
+      --page-border: #2a2a2a;
+      --svg-filter: invert(1);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: var(--bg);
+      background-color: var(--canvas-bg);
       color: var(--fg);
       font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
       height: 100vh;
@@ -361,56 +443,201 @@ export class BotoxPreviewPanel {
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
     #toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 14px;
+      padding: 5px 12px;
       background: var(--toolbar-bg);
       border-bottom: 1px solid var(--toolbar-border);
-      font-size: 12px;
+      font-size: 11px;
       user-select: none;
       z-index: 100;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      gap: 8px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+      flex-wrap: wrap;
+      transition: background-color 0.2s ease, border-color 0.2s ease;
     }
     .tool-group {
       display: flex;
       align-items: center;
       gap: 6px;
+      flex-shrink: 0;
     }
-    button {
+    .theme-select {
       background: var(--btn-bg);
       color: var(--btn-fg);
-      border: 1px solid transparent;
-      padding: 4px 10px;
-      border-radius: 3px;
+      border: 1px solid var(--toolbar-border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    .theme-select:hover {
+      background: var(--btn-hover);
+      border-color: var(--accent);
+    }
+    .theme-select:focus {
+      border-color: var(--accent);
+    }
+    .tool-btn {
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      border: 1px solid var(--toolbar-border);
+      padding: 3px 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 11px;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
       font-family: inherit;
+      transition: all 0.15s ease;
     }
-    button:hover { background: var(--btn-hover); }
-    button.active {
-      border-color: var(--accent);
+    .tool-btn:hover {
       background: var(--btn-hover);
+      color: #ffffff;
     }
-    button.active-sync {
+    .tool-btn.active {
       border-color: var(--accent);
       background: var(--btn-hover);
       color: #38bdf8;
-      font-weight: 600;
     }
-    .badge {
-      background: var(--badge-bg);
-      color: var(--badge-fg);
-      padding: 2px 7px;
-      border-radius: 10px;
+    .icon-btn {
+      background: transparent;
+      color: var(--btn-fg);
+      border: 1px solid transparent;
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      transition: all 0.15s ease;
+    }
+    .icon-btn:hover {
+      background: var(--btn-hover);
+      color: #ffffff;
+    }
+    .segmented-control {
+      display: inline-flex;
+      align-items: center;
+      background: var(--btn-bg);
+      border: 1px solid var(--toolbar-border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .segmented-control button {
+      background: transparent;
+      color: var(--btn-fg);
+      border: none;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      border-right: 1px solid var(--toolbar-border);
+      transition: background 0.15s ease;
+    }
+    .segmented-control button:last-child {
+      border-right: none;
+    }
+    .segmented-control button:hover {
+      background: var(--btn-hover);
+      color: #ffffff;
+    }
+    .segmented-control button.active {
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .segmented-control .zoom-label {
+      padding: 3px 7px;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      min-width: 42px;
+      text-align: center;
+      border-right: 1px solid var(--toolbar-border);
+      cursor: pointer;
+    }
+    .segmented-control .zoom-label:hover {
+      background: var(--btn-hover);
+    }
+    .sync-pill {
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      border: 1px solid var(--toolbar-border);
+      border-radius: 12px;
+      padding: 3px 9px;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+    .sync-pill:hover {
+      background: var(--btn-hover);
+    }
+    .sync-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #64748b;
+      transition: background 0.15s ease;
+    }
+    .sync-pill.active {
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    .sync-pill.active .dot {
+      background: #38bdf8;
+      box-shadow: 0 0 6px #38bdf8;
+    }
+    .page-nav-pill {
+      display: inline-flex;
+      align-items: center;
+      background: var(--btn-bg);
+      border: 1px solid var(--toolbar-border);
+      border-radius: 4px;
+      overflow: hidden;
+      padding: 0 2px;
+    }
+    .page-nav-pill button {
+      background: transparent;
+      border: none;
+      color: var(--btn-fg);
+      padding: 3px 6px;
+      cursor: pointer;
       font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
+    }
+    .page-nav-pill button:hover {
+      color: #ffffff;
+    }
+    .page-nav-pill input {
+      width: 32px;
+      text-align: center;
+      background: transparent;
+      border: none;
+      color: var(--fg);
+      font-size: 11px;
+      font-family: inherit;
+      padding: 2px 0;
+      outline: none;
+    }
+    .page-nav-pill .sep {
+      opacity: 0.5;
+      font-size: 10px;
+      margin: 0 2px;
+    }
+    .page-nav-pill .total {
+      font-size: 11px;
+      padding-right: 4px;
+      opacity: 0.85;
     }
     .timing-badge {
       background: rgba(255, 255, 255, 0.08);
@@ -419,30 +646,7 @@ export class BotoxPreviewPanel {
       border-radius: 4px;
       font-size: 10px;
       font-family: monospace;
-      opacity: 0.85;
-    }
-    #zoom-level {
-      min-width: 44px;
-      text-align: center;
-      font-size: 11px;
-      font-variant-numeric: tabular-nums;
-    }
-    #btn-error-badge {
-      display: none;
-      background: #7f1d1d;
-      color: #fca5a5;
-      border: 1px solid #ef4444;
-      font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 11px;
-      align-items: center;
-      gap: 5px;
-    }
-    #btn-error-badge:hover {
-      background: #991b1b;
-      color: #ffffff;
+      opacity: 0.75;
     }
 
     /* Full-screen Error Card when no pages rendered */
@@ -658,18 +862,21 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 24px 16px 48px;
-      gap: 20px;
+      padding: 28px 16px 56px;
+      gap: 24px;
+      background: var(--canvas-bg);
+      transition: background 0.2s ease;
     }
     .page-box {
-      background: #ffffff;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
-      border-radius: 3px;
+      background: var(--page-bg);
+      box-shadow: var(--page-shadow);
+      border: 1px solid var(--page-border);
+      border-radius: 4px;
       margin: 0 auto;
       display: block;
       position: relative;
       flex-shrink: 0;
-      transition: width 0.12s ease-out;
+      transition: width 0.12s ease-out, background 0.2s ease, box-shadow 0.2s ease;
       user-select: text;
       -webkit-user-select: text;
     }
@@ -678,7 +885,7 @@ export class BotoxPreviewPanel {
       -webkit-user-select: text;
     }
     .page-box ::selection {
-      background: rgba(56, 189, 248, 0.4);
+      background: rgba(56, 189, 248, 0.45);
       color: inherit;
     }
     .botox-text-layer {
@@ -695,31 +902,13 @@ export class BotoxPreviewPanel {
       height: 100% !important;
       display: block;
       pointer-events: auto;
+      filter: var(--svg-filter);
+      transition: filter 0.2s ease;
     }
-    .page-indicator {
-      font-size: 11px;
-      opacity: 0.85;
-    }
-    .page-nav {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      font-size: 11px;
-    }
-    .page-nav input {
-      width: 38px;
-      text-align: center;
-      background: var(--btn-bg);
-      border: 1px solid var(--toolbar-border);
-      color: var(--fg);
-      border-radius: 3px;
-      padding: 2px 4px;
-      font-size: 11px;
-      font-family: inherit;
-    }
-    .page-nav input:focus {
-      outline: 1px solid var(--accent);
-      border-color: var(--accent);
+    body[data-theme="dark"] .page-box svg image,
+    body[data-theme="nord"] .page-box svg image,
+    body[data-theme="oled"] .page-box svg image {
+      filter: invert(1) hue-rotate(180deg);
     }
     #viewer-container.slide-mode {
       padding: 0;
@@ -742,33 +931,49 @@ export class BotoxPreviewPanel {
 <body>
   <div id="toolbar">
     <div class="tool-group">
-      <button id="btn-refresh" title="Reload typeset preview">Reload</button>
-      <button id="btn-export" title="Compile PDF to file">Export PDF</button>
-      <button id="btn-slide-mode" title="Toggle Slide / Presentation View">Slide View</button>
-      <span class="badge">Pure Vector</span>
-    </div>
-    <div class="tool-group">
-      <button id="btn-sync" class="${initialSync ? 'active-sync' : ''}" title="Follow active cursor and editor scroll (click to toggle)">
-        Follow Cursor: ${initialSync ? 'ON' : 'OFF'}
+      <select id="theme-select" class="theme-select" title="Color Theme">
+        <option value="auto">Theme: Auto</option>
+        <option value="light">Light Paper</option>
+        <option value="warm">Warm Sepia</option>
+        <option value="dark">Dark Slate</option>
+        <option value="nord">Nord Polar</option>
+        <option value="oled">OLED Black</option>
+      </select>
+      <button id="btn-slide-mode" class="tool-btn" title="Toggle Slide / Presentation View">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v6h10V5H3z"/></svg>
+        <span>Slides</span>
       </button>
-      <button id="btn-zoom-out" title="Zoom Out (Ctrl -)">−</button>
-      <span id="zoom-level">100%</span>
-      <button id="btn-zoom-in" title="Zoom In (Ctrl +)">+</button>
-      <button id="btn-zoom-reset" title="Reset Zoom (100%)">100%</button>
-      <button id="btn-zoom-fit" title="Fit to Available Width">Fit Width</button>
     </div>
     <div class="tool-group">
-      <button id="btn-error-badge" title="Toggle Error Details">
+      <div class="segmented-control">
+        <button id="btn-zoom-out" title="Zoom Out (Ctrl -)">−</button>
+        <button id="btn-zoom-reset" class="zoom-label" title="Click to Reset Zoom (100%)"><span id="zoom-level">100%</span></button>
+        <button id="btn-zoom-in" title="Zoom In (Ctrl +)">+</button>
+        <button id="btn-zoom-fit" title="Fit to Available Width">Fit</button>
+      </div>
+      <button id="btn-sync" class="sync-pill ${initialSync ? 'active' : ''}" title="Follow active cursor and editor scroll (click to toggle)">
+        <span class="dot"></span>
+        <span>Sync</span>
+      </button>
+    </div>
+    <div class="tool-group">
+      <button id="btn-error-badge" class="tool-btn" style="display: none; color: #fca5a5; background: #7f1d1d; border-color: #ef4444;" title="Toggle Error Details">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>
         <span>Error</span>
       </button>
-      <button id="btn-prev-page" title="Previous Page (PageUp)">◂</button>
-      <span class="page-nav">
+      <div class="page-nav-pill">
+        <button id="btn-prev-page" title="Previous Page (PageUp)">◂</button>
         <input id="page-input" type="number" min="1" max="1" value="1" title="Type page number and press Enter" />
-        <span>/</span>
-        <span id="page-total">1</span>
-      </span>
-      <button id="btn-next-page" title="Next Page (PageDown)">▸</button>
+        <span class="sep">/</span>
+        <span id="page-total" class="total">1</span>
+        <button id="btn-next-page" title="Next Page (PageDown)">▸</button>
+      </div>
+      <button id="btn-refresh" class="icon-btn" title="Reload typeset preview">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+      </button>
+      <button id="btn-export" class="icon-btn" title="Export PDF with Botox">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+      </button>
       <span id="timing" class="timing-badge">${timingStr}</span>
     </div>
   </div>
@@ -817,6 +1022,27 @@ export class BotoxPreviewPanel {
     const btnHudClose = document.getElementById('btn-hud-close');
     const btnFit = document.getElementById('btn-zoom-fit');
     const btnSync = document.getElementById('btn-sync');
+    const themeSelect = document.getElementById('theme-select');
+
+    function applyTheme(t) {
+      document.body.setAttribute('data-theme', t);
+      if (themeSelect) themeSelect.value = t;
+      const state = vscode.getState() || {};
+      vscode.setState({ ...state, theme: t });
+    }
+
+    if (themeSelect) {
+      themeSelect.addEventListener('change', (e) => {
+        applyTheme(e.target.value);
+      });
+    }
+
+    const savedState = vscode.getState() || {};
+    if (savedState.theme) {
+      applyTheme(savedState.theme);
+    } else {
+      applyTheme('auto');
+    }
 
     let currentErrorMessage = '';
     let currentScale = 1.0;
@@ -826,12 +1052,10 @@ export class BotoxPreviewPanel {
 
     function updateSyncButtonUI() {
       if (syncScrollEnabled) {
-        btnSync.classList.add('active-sync');
-        btnSync.textContent = 'Follow Cursor: ON';
+        btnSync.classList.add('active');
         btnSync.title = 'Cursor and scroll synchronization is active (click to disable)';
       } else {
-        btnSync.classList.remove('active-sync');
-        btnSync.textContent = 'Follow Cursor: OFF';
+        btnSync.classList.remove('active');
         btnSync.title = 'Cursor and scroll synchronization is disabled (click to enable)';
       }
     }
