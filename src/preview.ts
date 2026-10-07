@@ -677,6 +677,19 @@ export class BotoxPreviewPanel {
       user-select: text;
       -webkit-user-select: text;
     }
+    .page-box ::selection {
+      background: rgba(56, 189, 248, 0.4);
+      color: inherit;
+    }
+    .botox-text-layer {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    .botox-text-layer text {
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
+    }
     .page-box svg {
       width: 100% !important;
       height: 100% !important;
