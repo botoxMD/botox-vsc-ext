@@ -24,6 +24,7 @@ export interface VectorCompilationResult {
     pages?: string[];
     headings?: VectorHeadingInfo[];
     numPages?: number;
+    isSlides?: boolean;
     error?: string;
     durationMs?: number;
 }
@@ -333,11 +334,15 @@ export async function compileForPreview(
                     // ignore unlink errors
                 }
                 const parsed = JSON.parse(rawJson);
+                const isSlides = parsed.is_slides !== undefined
+                    ? Boolean(parsed.is_slides)
+                    : Boolean(parsed.pages && parsed.pages.length > 0 && parsed.pages[0].includes('841.89'));
                 resolve({
                     success: true,
                     pages: parsed.pages || [],
                     headings: parsed.headings || [],
                     numPages: parsed.num_pages || parsed.pages?.length || 0,
+                    isSlides,
                     durationMs
                 });
             } catch (e: any) {

@@ -16,6 +16,7 @@ export class BotoxPreviewPanel {
     private _lastNumPages: number = 0;
     private _activeDocumentTheme: string = 'academic';
     private _userChangedTheme: boolean = false;
+    private _isSlides: boolean = false;
 
     public static get(documentUri: vscode.Uri): BotoxPreviewPanel | undefined {
         const direct = BotoxPreviewPanel.currentPanels.get(documentUri.toString());
@@ -274,12 +275,18 @@ export class BotoxPreviewPanel {
             );
 
             if (result.success && result.pages) {
+                if (result.isSlides !== undefined && result.isSlides !== this._isSlides) {
+                    this._isSlides = result.isSlides;
+                    if (!this._userChangedTheme) {
+                        this._activeDocumentTheme = this._isSlides ? 'default' : 'academic';
+                    }
+                }
                 this._lastHeadings = result.headings || [];
                 this._lastNumPages = result.numPages || result.pages.length;
                 reportCompilationSuccess(this._documentUri, result.durationMs);
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;
                 if (!this._htmlInitialized) {
-                    this._panel.webview.html = this._getHtmlForWebview(result.pages, result.headings || [], result.durationMs);
+                    this._panel.webview.html = this._getHtmlForWebview(result.pages, result.headings || [], result.durationMs, undefined, this._isSlides);
                     this._htmlInitialized = true;
                 } else {
                     this._panel.webview.postMessage({
@@ -287,6 +294,7 @@ export class BotoxPreviewPanel {
                         pages: result.pages,
                         headings: result.headings || [],
                         durationMs: result.durationMs,
+                        isSlides: this._isSlides,
                         activeTheme: this._activeDocumentTheme
                     });
                 }
@@ -297,7 +305,7 @@ export class BotoxPreviewPanel {
                 const errMsg = result.error || 'Compilation failed with unknown error.';
                 reportCompilationFailure(this._documentUri, errMsg);
                 if (!this._htmlInitialized) {
-                    this._panel.webview.html = this._getHtmlForWebview([], [], result.durationMs, errMsg);
+                    this._panel.webview.html = this._getHtmlForWebview([], [], result.durationMs, errMsg, this._isSlides);
                     this._htmlInitialized = true;
                 } else {
                     this._panel.webview.postMessage({
@@ -310,7 +318,7 @@ export class BotoxPreviewPanel {
             const errMsg = e.message || String(e);
             reportCompilationFailure(this._documentUri, errMsg);
             if (!this._htmlInitialized) {
-                this._panel.webview.html = this._getHtmlForWebview([], [], undefined, errMsg);
+                this._panel.webview.html = this._getHtmlForWebview([], [], undefined, errMsg, this._isSlides);
                 this._htmlInitialized = true;
             } else {
                 this._panel.webview.postMessage({
@@ -341,7 +349,7 @@ export class BotoxPreviewPanel {
         }
     }
 
-    private _getHtmlForWebview(initialPages: string[], initialHeadings: VectorHeadingInfo[] = [], durationMs?: number, initialError?: string): string {
+    private _getHtmlForWebview(initialPages: string[], initialHeadings: VectorHeadingInfo[] = [], durationMs?: number, initialError?: string, isSlides: boolean = false): string {
         const title = path.basename(this._documentUri.fsPath);
         const timingStr = durationMs ? `${durationMs}ms` : '';
         const pagesJson = JSON.stringify(initialPages);
@@ -950,14 +958,7 @@ export class BotoxPreviewPanel {
 <body>
   <div id="toolbar">
     <div class="tool-group">
-      <select id="theme-select" class="theme-select" title="Document Theme">
-        <option value="academic"${activeTheme === 'academic' ? ' selected' : ''}>Academic (LaTeX)</option>
-        <option value="modern"${activeTheme === 'modern' ? ' selected' : ''}>Modern Report</option>
-        <option value="elegant"${activeTheme === 'elegant' ? ' selected' : ''}>Elegant Book</option>
-        <option value="technical"${activeTheme === 'technical' ? ' selected' : ''}>Technical Spec</option>
-        <option value="compact"${activeTheme === 'compact' ? ' selected' : ''}>Compact (2-Col)</option>
-        <option value="minimal"${activeTheme === 'minimal' ? ' selected' : ''}>Minimalist</option>
-      </select>
+      <select id="theme-select" class="theme-select" title="${isSlides ? 'Slide Theme (Marp / Presentation)' : 'Document Theme (Typst)'}"></select>
       <button id="btn-slide-mode" class="tool-btn" title="Toggle Slide / Presentation View">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v6h10V5H3z"/></svg>
         <span>Slides</span>
@@ -1043,6 +1044,50 @@ export class BotoxPreviewPanel {
     const btnSync = document.getElementById('btn-sync');
     const themeSelect = document.getElementById('theme-select');
 
+    const slideThemes = [
+      { id: 'default', label: 'Default (Clean Light)' },
+      { id: 'gaia', label: 'Gaia (Marp Warm / Terracotta)' },
+      { id: 'uncover', label: 'Uncover (Marp Minimalist / Cyan)' },
+      { id: 'nord', label: 'Nord (Frost Dark)' },
+      { id: 'dark', label: 'Dark (Slate Modern)' },
+      { id: 'academic', label: 'Academic (White Beamer)' }
+    ];
+
+    const docThemes = [
+      { id: 'academic', label: 'Academic (Typst / LaTeX)' },
+      { id: 'modern', label: 'Modern Report (Typst)' },
+      { id: 'elegant', label: 'Elegant Book (Typst)' },
+      { id: 'technical', label: 'Technical Spec (Typst)' },
+      { id: 'compact', label: 'Compact 2-Col (Typst)' },
+      { id: 'minimal', label: 'Minimalist (Typst)' }
+    ];
+
+    let currentIsSlides = ${isSlides ? 'true' : 'false'};
+
+    function renderThemeOptions(isSlides, activeTheme) {
+      if (!themeSelect) return;
+      currentIsSlides = isSlides;
+      const list = isSlides ? slideThemes : docThemes;
+      themeSelect.title = isSlides ? "Slide Theme (Marp / Presentation)" : "Document Theme (Typst)";
+
+      const prevVal = (activeTheme || themeSelect.value || '').toLowerCase();
+      themeSelect.innerHTML = '';
+      let matched = false;
+      for (const t of list) {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.label;
+        if (t.id === prevVal) {
+          opt.selected = true;
+          matched = true;
+        }
+        themeSelect.appendChild(opt);
+      }
+      if (!matched && list.length > 0) {
+        themeSelect.value = list[0].id;
+      }
+    }
+
     if (themeSelect) {
       themeSelect.addEventListener('change', (e) => {
         const chosen = e.target.value;
@@ -1056,9 +1101,7 @@ export class BotoxPreviewPanel {
     }
 
     const savedState = vscode.getState() || {};
-    if (savedState.docTheme && themeSelect) {
-      themeSelect.value = savedState.docTheme;
-    }
+    renderThemeOptions(currentIsSlides, savedState.docTheme || "${activeTheme}");
 
     let currentErrorMessage = '';
     let currentScale = 1.0;
@@ -1814,8 +1857,12 @@ export class BotoxPreviewPanel {
       const message = event.data;
       if (message.type === 'pages') {
         renderPages(message.pages, message.headings || [], message.durationMs);
-        if (message.activeTheme && themeSelect) {
+        if (typeof message.isSlides === 'boolean') {
+          renderThemeOptions(message.isSlides, message.activeTheme);
+        } else if (message.activeTheme && themeSelect) {
           themeSelect.value = message.activeTheme;
+        }
+        if (message.activeTheme) {
           const state = vscode.getState() || {};
           vscode.setState({ ...state, docTheme: message.activeTheme });
         }
