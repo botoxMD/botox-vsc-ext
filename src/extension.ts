@@ -70,7 +70,12 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(statusBarItem);
     context.subscriptions.push(botoxDiagnostics);
 
-    vscode.window.onDidChangeActiveTextEditor(() => updateStatusBar(), null, context.subscriptions);
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+        updateStatusBar();
+        if (editor) {
+            syncScrollToPreview(editor);
+        }
+    }, null, context.subscriptions);
     vscode.workspace.onDidCloseTextDocument(doc => {
         botoxDiagnostics.delete(doc.uri);
     }, null, context.subscriptions);
@@ -216,7 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const panel = BotoxPreviewPanel.currentPanels.get(document.uri.toString());
+        const panel = BotoxPreviewPanel.get(document.uri);
         if (panel) {
             panel.update();
         }
@@ -229,7 +234,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const panel = BotoxPreviewPanel.currentPanels.get(event.document.uri.toString());
+        const panel = BotoxPreviewPanel.get(event.document.uri);
         if (panel) {
             if (debounceTimeout) {
                 clearTimeout(debounceTimeout);
@@ -307,14 +312,17 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 }
 
     // Follow Cursor & Synchronized Scroll
-    let scrollThrottleTimeout: NodeJS.Timeout | undefined;
-    const syncScrollToPreview = (editor: vscode.TextEditor, line?: number) => {
+    let lastScrollTime = 0;
+    let pendingScrollTimer: NodeJS.Timeout | undefined;
+    let lastTargetLine: number | undefined;
+
+    function syncScrollToPreview(editor: vscode.TextEditor, line?: number) {
         const fsPath = editor.document.uri.fsPath;
         if (!fsPath.endsWith('.md') && !fsPath.endsWith('.markdown')) {
             return;
         }
 
-        const panel = BotoxPreviewPanel.currentPanels.get(editor.document.uri.toString());
+        const panel = BotoxPreviewPanel.get(editor.document.uri);
         if (!panel) return;
 
         const config = vscode.workspace.getConfiguration('botox');
@@ -323,14 +331,19 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         }
 
         const targetLine = line !== undefined ? line : editor.selection.active.line;
+        lastTargetLine = targetLine;
 
-        if (scrollThrottleTimeout) {
-            clearTimeout(scrollThrottleTimeout);
-        }
+        const now = Date.now();
+        const interval = 20; // 50fps smooth tracking
 
-        scrollThrottleTimeout = setTimeout(() => {
-            scrollThrottleTimeout = undefined;
-            const ctx = getSyncContext(editor.document, targetLine);
+        const fire = () => {
+            if (pendingScrollTimer) {
+                clearTimeout(pendingScrollTimer);
+                pendingScrollTimer = undefined;
+            }
+            lastScrollTime = Date.now();
+            const l = lastTargetLine !== undefined ? lastTargetLine : targetLine;
+            const ctx = getSyncContext(editor.document, l);
             panel.scrollToLine(
                 ctx.line,
                 ctx.totalLines,
@@ -341,8 +354,14 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
                 ctx.prevHeading,
                 ctx.nextHeading
             );
-        }, 25);
-    };
+        };
+
+        if (now - lastScrollTime >= interval) {
+            fire();
+        } else if (!pendingScrollTimer) {
+            pendingScrollTimer = setTimeout(fire, interval - (now - lastScrollTime));
+        }
+    }
 
     const onSelectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.selections.length > 0) {
@@ -352,14 +371,17 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 
     const onVisibleRangesChangeDisposable = vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
         if (event.visibleRanges.length > 0) {
-            const cursorLine = event.textEditor.selection.active.line;
             const range = event.visibleRanges[0];
-            if (cursorLine >= range.start.line && cursorLine <= range.end.line) {
-                syncScrollToPreview(event.textEditor, cursorLine);
+            const totalLines = event.textEditor.document.lineCount;
+            let targetLine: number;
+            if (range.start.line === 0) {
+                targetLine = 0;
+            } else if (range.end.line >= totalLines - 1) {
+                targetLine = totalLines - 1;
             } else {
-                const midLine = Math.floor((range.start.line + range.end.line) / 2);
-                syncScrollToPreview(event.textEditor, midLine);
+                targetLine = Math.floor((range.start.line + range.end.line) / 2);
             }
+            syncScrollToPreview(event.textEditor, targetLine);
         }
     });
 

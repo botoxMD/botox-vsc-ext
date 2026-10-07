@@ -15,9 +15,20 @@ export class BotoxPreviewPanel {
     private _lastHeadings: VectorHeadingInfo[] = [];
     private _lastNumPages: number = 0;
 
+    public static get(documentUri: vscode.Uri): BotoxPreviewPanel | undefined {
+        const direct = BotoxPreviewPanel.currentPanels.get(documentUri.toString());
+        if (direct) return direct;
+        for (const panel of BotoxPreviewPanel.currentPanels.values()) {
+            if (panel._documentUri.fsPath === documentUri.fsPath) {
+                return panel;
+            }
+        }
+        return undefined;
+    }
+
     public static createOrShow(documentUri: vscode.Uri, viewColumn?: vscode.ViewColumn) {
         const key = documentUri.toString();
-        const existing = BotoxPreviewPanel.currentPanels.get(key);
+        const existing = BotoxPreviewPanel.get(documentUri);
 
         if (existing) {
             existing._panel.reveal(viewColumn);
@@ -84,17 +95,70 @@ export class BotoxPreviewPanel {
 
         try {
             const doc = await vscode.workspace.openTextDocument(this._documentUri);
-            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            let editor = vscode.window.visibleTextEditors.find(
+                e => e.document.uri.toString() === this._documentUri.toString() ||
+                     e.document.uri.fsPath === this._documentUri.fsPath
+            );
+
+            if (!editor) {
+                editor = await vscode.window.showTextDocument(doc, {
+                    viewColumn: vscode.ViewColumn.One,
+                    preserveFocus: false
+                });
+            } else {
+                editor = await vscode.window.showTextDocument(editor.document, {
+                    viewColumn: editor.viewColumn,
+                    preserveFocus: false
+                });
+            }
+
+            if (doc.lineCount === 0) return;
+
+            const totalPages = Math.max(1, this._lastNumPages || 1);
+            const expectedLine = Math.min(
+                Math.max(0, Math.floor(((pageIndex + yRatio) / totalPages) * doc.lineCount)),
+                doc.lineCount - 1
+            );
 
             let targetLine = -1;
 
-            if (selectedText && selectedText.length >= 3) {
-                const textLower = selectedText.toLowerCase();
-                for (let i = 0; i < doc.lineCount; i++) {
-                    const lineText = doc.lineAt(i).text.toLowerCase();
-                    if (lineText.includes(textLower)) {
-                        targetLine = i;
-                        break;
+            if (selectedText && selectedText.length >= 2) {
+                const words = selectedText
+                    .toLowerCase()
+                    .replace(/[^a-z0-9 ]/gi, ' ')
+                    .split(/\s+/)
+                    .filter(w => w.length >= 2);
+
+                if (words.length > 0) {
+                    const exact = selectedText.trim().toLowerCase();
+                    let bestExactDist = Infinity;
+                    for (let i = 0; i < doc.lineCount; i++) {
+                        if (doc.lineAt(i).text.toLowerCase().includes(exact)) {
+                            const dist = Math.abs(i - expectedLine);
+                            if (dist < bestExactDist) {
+                                bestExactDist = dist;
+                                targetLine = i;
+                            }
+                        }
+                    }
+
+                    if (targetLine < 0) {
+                        let bestScore = -Infinity;
+                        for (let i = 0; i < doc.lineCount; i++) {
+                            const lineLower = doc.lineAt(i).text.toLowerCase();
+                            let matchCount = 0;
+                            for (const w of words) {
+                                if (lineLower.includes(w)) matchCount++;
+                            }
+                            if (matchCount >= Math.min(words.length, 2)) {
+                                const dist = Math.abs(i - expectedLine);
+                                const score = matchCount * 100 - dist;
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    targetLine = i;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -107,27 +171,32 @@ export class BotoxPreviewPanel {
                     }
                 }
                 if (bestH && bestH.text) {
-                    const cleanH = bestH.text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+                    const cleanH = bestH.text.toLowerCase().replace(/[^a-z0-9]/gi, '').trim();
+                    let bestDist = Infinity;
                     for (let i = 0; i < doc.lineCount; i++) {
-                        const lineText = doc.lineAt(i).text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-                        if (lineText.includes(cleanH) || cleanH.includes(lineText)) {
-                            targetLine = i;
-                            break;
+                        const lineClean = doc.lineAt(i).text.toLowerCase().replace(/[^a-z0-9]/gi, '').trim();
+                        if (cleanH.length >= 2 && (lineClean.includes(cleanH) || cleanH.includes(lineClean))) {
+                            const dist = Math.abs(i - expectedLine);
+                            if (dist < bestDist) {
+                                bestDist = dist;
+                                targetLine = i;
+                            }
                         }
                     }
                 }
             }
 
             if (targetLine < 0) {
-                const totalPages = Math.max(1, this._lastNumPages || 1);
-                const overallRatio = (pageIndex + yRatio) / totalPages;
-                targetLine = Math.min(Math.max(0, Math.floor(overallRatio * doc.lineCount)), doc.lineCount - 1);
+                targetLine = expectedLine;
             }
 
-            const range = doc.lineAt(targetLine).range;
-            editor.selection = new vscode.Selection(range.start, range.start);
-            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-        } catch {}
+            targetLine = Math.min(Math.max(0, targetLine), doc.lineCount - 1);
+            const targetRange = doc.lineAt(targetLine).range;
+            editor.selection = new vscode.Selection(targetRange.start, targetRange.start);
+            editor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
+        } catch (e) {
+            console.error('Botox jumpToSource error:', e);
+        }
     }
 
     public scrollToLine(
@@ -591,7 +660,6 @@ export class BotoxPreviewPanel {
       align-items: center;
       padding: 24px 16px 48px;
       gap: 20px;
-      scroll-behavior: smooth;
     }
     .page-box {
       background: #ffffff;
@@ -605,12 +673,14 @@ export class BotoxPreviewPanel {
       user-select: text;
       -webkit-user-select: text;
     }
+    .page-box, .page-box * {
+      user-select: text;
+      -webkit-user-select: text;
+    }
     .page-box svg {
       width: 100% !important;
       height: 100% !important;
       display: block;
-      user-select: text;
-      -webkit-user-select: text;
       pointer-events: auto;
     }
     .page-indicator {
@@ -1041,7 +1111,7 @@ export class BotoxPreviewPanel {
     function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine, prevHeading, nextHeading) {
       if (!syncScrollEnabled || totalLines <= 1) return;
 
-      if (cachedPageMetrics.length === 0) {
+      if (cachedPageMetrics.length === 0 || cachedPageMetrics.some(m => !m.height || m.height <= 0)) {
         updatePageMetrics();
       }
       const totalPages = cachedPageMetrics.length;
@@ -1049,6 +1119,15 @@ export class BotoxPreviewPanel {
 
       const maxScroll = container.scrollHeight - container.clientHeight;
       if (maxScroll <= 0) return;
+
+      if (line <= 0) {
+        container.scrollTop = 0;
+        return;
+      }
+      if (line >= totalLines - 1) {
+        container.scrollTop = maxScroll;
+        return;
+      }
 
       const halfViewport = container.clientHeight / 2;
 
@@ -1127,16 +1206,21 @@ export class BotoxPreviewPanel {
         }
       }
 
+      if (isSlideMode) {
+        for (let i = 0; i < cachedPageMetrics.length; i++) {
+          const m = cachedPageMetrics[i];
+          if (targetY >= m.top && targetY <= m.top + m.height) {
+            scrollToPage(i);
+            break;
+          }
+        }
+        return;
+      }
+
       // Centered vertically in viewport!
       const centeredTarget = targetY - halfViewport;
       const clampedTarget = Math.max(0, Math.min(centeredTarget, maxScroll));
-      const currentTop = container.scrollTop;
-      const distance = Math.abs(currentTop - clampedTarget);
-
-      container.scrollTo({
-        top: clampedTarget,
-        behavior: distance < 1400 ? 'smooth' : 'auto'
-      });
+      container.scrollTop = clampedTarget;
     }
 
     let currentPageIndex = 0;
@@ -1169,20 +1253,36 @@ export class BotoxPreviewPanel {
         svgEl.style.webkitUserSelect = 'text';
         svgEl.style.pointerEvents = 'auto';
       }
-
-      pageBox.ondblclick = (e) => {
-        const sel = window.getSelection() ? window.getSelection().toString().trim() : '';
-        const rect = pageBox.getBoundingClientRect();
-        const clickY = e.clientY - rect.top;
-        const yRatio = rect.height > 0 ? Math.max(0, Math.min(1, clickY / rect.height)) : 0;
-        vscode.postMessage({
-          command: 'jumpToSource',
-          pageIndex: i,
-          yRatio: yRatio,
-          selectedText: sel
-        });
-      };
     }
+
+    container.addEventListener('dblclick', (e) => {
+      let el = e.target;
+      let pageBox = null;
+      while (el && el !== container) {
+        if (el.classList && el.classList.contains('page-box')) {
+          pageBox = el;
+          break;
+        }
+        el = el.parentElement || el.parentNode;
+      }
+      if (!pageBox) return;
+
+      const pageId = pageBox.id || '';
+      const pageIndex = parseInt(pageId.replace('page-', ''), 10) - 1;
+      if (isNaN(pageIndex) || pageIndex < 0) return;
+
+      const sel = window.getSelection() ? window.getSelection().toString().trim() : '';
+      const rect = pageBox.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const yRatio = rect.height > 0 ? Math.max(0, Math.min(1, clickY / rect.height)) : 0;
+
+      vscode.postMessage({
+        command: 'jumpToSource',
+        pageIndex: pageIndex,
+        yRatio: yRatio,
+        selectedText: sel
+      });
+    });
 
     function updateSlideView() {
       const pages = container.querySelectorAll('.page-box');
