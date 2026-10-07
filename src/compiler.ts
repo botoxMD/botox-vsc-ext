@@ -234,7 +234,8 @@ export function abortActivePreview(inputPath: string): boolean {
 
 export async function compileForPreview(
     inputPath: string,
-    liveContent?: string
+    liveContent?: string,
+    theme?: string
 ): Promise<VectorCompilationResult> {
     abortActivePreview(inputPath);
 
@@ -258,6 +259,10 @@ export async function compileForPreview(
     const args = useStdin
         ? ['-', '-o', targetOutput, '--resource-dir', inputDir]
         : [inputPath, '-o', targetOutput];
+
+    if (theme) {
+        args.push('--theme', theme);
+    }
 
     return new Promise((resolve) => {
         const proc = child_process.spawn(binary, args, {

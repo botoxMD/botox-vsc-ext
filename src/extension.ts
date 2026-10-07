@@ -100,7 +100,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 2. Compile to PDF directly
     const compilePdfCmd = vscode.commands.registerCommand(
         'botox.compilePdf',
-        async (uri?: vscode.Uri) => {
+        async (uri?: vscode.Uri, theme?: string) => {
             const documentUri = uri || vscode.window.activeTextEditor?.document.uri;
             if (!documentUri) {
                 vscode.window.showWarningMessage('Botox: No active Markdown document to compile.');
@@ -127,7 +127,8 @@ export function activate(context: vscode.ExtensionContext) {
                     cancellable: false
                 },
                 async () => {
-                    const result = await compileDocument(inputPath, saveUri.fsPath);
+                    const extraArgs = theme ? ['--theme', theme] : [];
+                    const result = await compileDocument(inputPath, saveUri.fsPath, extraArgs);
                     if (result.success) {
                         reportCompilationSuccess(documentUri, result.durationMs);
                         const openItem = 'Open PDF';

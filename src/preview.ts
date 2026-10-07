@@ -14,6 +14,8 @@ export class BotoxPreviewPanel {
     private _htmlInitialized: boolean = false;
     private _lastHeadings: VectorHeadingInfo[] = [];
     private _lastNumPages: number = 0;
+    private _activeDocumentTheme: string = 'academic';
+    private _userChangedTheme: boolean = false;
 
     public static get(documentUri: vscode.Uri): BotoxPreviewPanel | undefined {
         const direct = BotoxPreviewPanel.currentPanels.get(documentUri.toString());
@@ -66,8 +68,15 @@ export class BotoxPreviewPanel {
                     case 'refresh':
                         this.update();
                         return;
+                    case 'changeDocumentTheme':
+                        if (message.theme && typeof message.theme === 'string') {
+                            this._activeDocumentTheme = message.theme;
+                            this._userChangedTheme = true;
+                            this.update();
+                        }
+                        return;
                     case 'exportPdf':
-                        vscode.commands.executeCommand('botox.compilePdf', this._documentUri);
+                        vscode.commands.executeCommand('botox.compilePdf', this._documentUri, this._activeDocumentTheme);
                         return;
                     case 'toggleSyncScroll': {
                         const config = vscode.workspace.getConfiguration('botox');
@@ -251,9 +260,17 @@ export class BotoxPreviewPanel {
                 }
             }
 
+            if (!this._userChangedTheme && content) {
+                const themeMatch = content.match(/^theme:\s*["']?([a-zA-Z0-9_-]+)["']?/m);
+                if (themeMatch && themeMatch[1]) {
+                    this._activeDocumentTheme = themeMatch[1].toLowerCase();
+                }
+            }
+
             const result: VectorCompilationResult = await compileForPreview(
                 this._documentUri.fsPath,
-                content
+                content,
+                this._activeDocumentTheme
             );
 
             if (result.success && result.pages) {
@@ -269,7 +286,8 @@ export class BotoxPreviewPanel {
                         type: 'pages',
                         pages: result.pages,
                         headings: result.headings || [],
-                        durationMs: result.durationMs
+                        durationMs: result.durationMs,
+                        activeTheme: this._activeDocumentTheme
                     });
                 }
             } else if (result.error && result.error.includes('Aborted:')) {
@@ -330,6 +348,7 @@ export class BotoxPreviewPanel {
         const headingsJson = JSON.stringify(initialHeadings);
         const initialErrorJson = JSON.stringify(initialError || null);
         const initialSync = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
+        const activeTheme = this._activeDocumentTheme;
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -931,13 +950,13 @@ export class BotoxPreviewPanel {
 <body>
   <div id="toolbar">
     <div class="tool-group">
-      <select id="theme-select" class="theme-select" title="Color Theme">
-        <option value="auto">Theme: Auto</option>
-        <option value="light">Light Paper</option>
-        <option value="warm">Warm Sepia</option>
-        <option value="dark">Dark Slate</option>
-        <option value="nord">Nord Polar</option>
-        <option value="oled">OLED Black</option>
+      <select id="theme-select" class="theme-select" title="Document Theme">
+        <option value="academic"${activeTheme === 'academic' ? ' selected' : ''}>Academic (LaTeX)</option>
+        <option value="modern"${activeTheme === 'modern' ? ' selected' : ''}>Modern Report</option>
+        <option value="elegant"${activeTheme === 'elegant' ? ' selected' : ''}>Elegant Book</option>
+        <option value="technical"${activeTheme === 'technical' ? ' selected' : ''}>Technical Spec</option>
+        <option value="compact"${activeTheme === 'compact' ? ' selected' : ''}>Compact (2-Col)</option>
+        <option value="minimal"${activeTheme === 'minimal' ? ' selected' : ''}>Minimalist</option>
       </select>
       <button id="btn-slide-mode" class="tool-btn" title="Toggle Slide / Presentation View">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v6h10V5H3z"/></svg>
@@ -1024,24 +1043,21 @@ export class BotoxPreviewPanel {
     const btnSync = document.getElementById('btn-sync');
     const themeSelect = document.getElementById('theme-select');
 
-    function applyTheme(t) {
-      document.body.setAttribute('data-theme', t);
-      if (themeSelect) themeSelect.value = t;
-      const state = vscode.getState() || {};
-      vscode.setState({ ...state, theme: t });
-    }
-
     if (themeSelect) {
       themeSelect.addEventListener('change', (e) => {
-        applyTheme(e.target.value);
+        const chosen = e.target.value;
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, docTheme: chosen });
+        vscode.postMessage({
+          command: 'changeDocumentTheme',
+          theme: chosen
+        });
       });
     }
 
     const savedState = vscode.getState() || {};
-    if (savedState.theme) {
-      applyTheme(savedState.theme);
-    } else {
-      applyTheme('auto');
+    if (savedState.docTheme && themeSelect) {
+      themeSelect.value = savedState.docTheme;
     }
 
     let currentErrorMessage = '';
@@ -1798,6 +1814,11 @@ export class BotoxPreviewPanel {
       const message = event.data;
       if (message.type === 'pages') {
         renderPages(message.pages, message.headings || [], message.durationMs);
+        if (message.activeTheme && themeSelect) {
+          themeSelect.value = message.activeTheme;
+          const state = vscode.getState() || {};
+          vscode.setState({ ...state, docTheme: message.activeTheme });
+        }
       } else if (message.type === 'syncScroll') {
         handleSyncScroll(
           message.line,
