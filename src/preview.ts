@@ -15,7 +15,6 @@ export class BotoxPreviewPanel {
     private _lastHeadings: VectorHeadingInfo[] = [];
     private _lastNumPages: number = 0;
     private _activeDocumentTheme: string = 'academic';
-    private _userChangedTheme: boolean = false;
     private _isSlides: boolean = false;
 
     public static get(documentUri: vscode.Uri): BotoxPreviewPanel | undefined {
@@ -72,7 +71,13 @@ export class BotoxPreviewPanel {
                     case 'changeDocumentTheme':
                         if (message.theme && typeof message.theme === 'string') {
                             this._activeDocumentTheme = message.theme;
-                            this._userChangedTheme = true;
+                            this._updateDocumentFrontmatterTheme(message.theme);
+                            this.update();
+                        }
+                        return;
+                    case 'toggleDocumentSlides':
+                        if (typeof message.isSlides === 'boolean') {
+                            this._updateDocumentFrontmatterSlides(message.isSlides);
                             this.update();
                         }
                         return;
@@ -239,6 +244,72 @@ export class BotoxPreviewPanel {
         });
     }
 
+    private async _updateDocumentFrontmatterTheme(newTheme: string) {
+        try {
+            const doc = await vscode.workspace.openTextDocument(this._documentUri);
+            const text = doc.getText();
+            const edit = new vscode.WorkspaceEdit();
+
+            const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---/;
+            const match = text.match(fmRegex);
+
+            if (match) {
+                const fmBody = match[1];
+                const themeLineRegex = /^[ \t]*theme:\s*.*$/m;
+                if (themeLineRegex.test(fmBody)) {
+                    const newFmBody = fmBody.replace(themeLineRegex, `theme: ${newTheme}`);
+                    const fullFm = `---\n${newFmBody}\n---`;
+                    const range = new vscode.Range(doc.positionAt(0), doc.positionAt(match[0].length));
+                    edit.replace(this._documentUri, range, fullFm);
+                } else {
+                    const closingIndex = text.indexOf('---', 3);
+                    if (closingIndex !== -1) {
+                        edit.insert(this._documentUri, doc.positionAt(closingIndex), `theme: ${newTheme}\n`);
+                    }
+                }
+            } else {
+                edit.insert(this._documentUri, new vscode.Position(0, 0), `---\ntheme: ${newTheme}\n---\n\n`);
+            }
+
+            await vscode.workspace.applyEdit(edit);
+        } catch (err) {
+            console.error('Botox: Failed to update document frontmatter theme:', err);
+        }
+    }
+
+    private async _updateDocumentFrontmatterSlides(enableSlides: boolean) {
+        try {
+            const doc = await vscode.workspace.openTextDocument(this._documentUri);
+            const text = doc.getText();
+            const edit = new vscode.WorkspaceEdit();
+
+            const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---/;
+            const match = text.match(fmRegex);
+
+            if (match) {
+                const fmBody = match[1];
+                const marpLineRegex = /^[ \t]*(marp|slides|presentation):\s*.*$/m;
+                if (marpLineRegex.test(fmBody)) {
+                    const newFmBody = fmBody.replace(marpLineRegex, `marp: ${enableSlides}`);
+                    const fullFm = `---\n${newFmBody}\n---`;
+                    const range = new vscode.Range(doc.positionAt(0), doc.positionAt(match[0].length));
+                    edit.replace(this._documentUri, range, fullFm);
+                } else {
+                    const closingIndex = text.indexOf('---', 3);
+                    if (closingIndex !== -1) {
+                        edit.insert(this._documentUri, doc.positionAt(closingIndex), `marp: ${enableSlides}\n`);
+                    }
+                }
+            } else {
+                edit.insert(this._documentUri, new vscode.Position(0, 0), `---\nmarp: ${enableSlides}\n---\n\n`);
+            }
+
+            await vscode.workspace.applyEdit(edit);
+        } catch (err) {
+            console.error('Botox: Failed to update document frontmatter slides:', err);
+        }
+    }
+
     public async update(liveContent?: string) {
         if (this._isCompiling) {
             this._pendingCompile = true;
@@ -261,7 +332,7 @@ export class BotoxPreviewPanel {
                 }
             }
 
-            if (!this._userChangedTheme && content) {
+            if (content) {
                 const themeMatch = content.match(/^theme:\s*["']?([a-zA-Z0-9_-]+)["']?/m);
                 if (themeMatch && themeMatch[1]) {
                     this._activeDocumentTheme = themeMatch[1].toLowerCase();
@@ -277,8 +348,15 @@ export class BotoxPreviewPanel {
             if (result.success && result.pages) {
                 if (result.isSlides !== undefined && result.isSlides !== this._isSlides) {
                     this._isSlides = result.isSlides;
-                    if (!this._userChangedTheme) {
+                    const docThemeList = ['academic', 'modern', 'elegant', 'technical', 'compact', 'minimal'];
+                    const slideThemeList = ['default', 'academic', 'gaia', 'uncover', 'dark', 'nord'];
+                    const hasExplicitTheme = content && /^theme:\s*["']?([a-zA-Z0-9_-]+)["']?/m.test(content);
+                    if (!hasExplicitTheme) {
                         this._activeDocumentTheme = this._isSlides ? 'default' : 'academic';
+                    } else if (this._isSlides && !slideThemeList.includes(this._activeDocumentTheme)) {
+                        this._activeDocumentTheme = 'default';
+                    } else if (!this._isSlides && !docThemeList.includes(this._activeDocumentTheme)) {
+                        this._activeDocumentTheme = 'academic';
                     }
                 }
                 this._lastHeadings = result.headings || [];
@@ -959,9 +1037,13 @@ export class BotoxPreviewPanel {
   <div id="toolbar">
     <div class="tool-group">
       <select id="theme-select" class="theme-select" title="${isSlides ? 'Slide Theme (Marp / Presentation)' : 'Document Theme (Typst)'}"></select>
-      <button id="btn-slide-mode" class="tool-btn" title="Toggle Slide / Presentation View">
+      <button id="btn-toggle-slides" class="tool-btn ${isSlides ? 'active' : ''}" title="Toggle Slides Deck (sets marp: true/false in document)">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v6h10V5H3z"/></svg>
         <span>Slides</span>
+      </button>
+      <button id="btn-present-mode" class="tool-btn" title="Present Single Slide (Left/Right arrow keys)">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5V3z"/></svg>
+        <span>Present</span>
       </button>
     </div>
     <div class="tool-group">
@@ -1029,7 +1111,8 @@ export class BotoxPreviewPanel {
     const pageTotal = document.getElementById('page-total');
     const btnPrevPage = document.getElementById('btn-prev-page');
     const btnNextPage = document.getElementById('btn-next-page');
-    const btnSlideMode = document.getElementById('btn-slide-mode');
+    const btnToggleSlides = document.getElementById('btn-toggle-slides');
+    const btnPresentMode = document.getElementById('btn-present-mode');
     const timingBadge = document.getElementById('timing');
     const btnErrorBadge = document.getElementById('btn-error-badge');
     const errorHud = document.getElementById('error-hud');
@@ -1520,11 +1603,7 @@ export class BotoxPreviewPanel {
     }
 
     let currentPageIndex = 0;
-    let isSlideMode = ${isSlides ? 'true' : 'false'};
-    if (isSlideMode) {
-      if (btnSlideMode) btnSlideMode.classList.add('active');
-      container.classList.add('slide-mode');
-    }
+    let isSlideMode = false;
 
     function setupPageBox(pageBox, svgContent, i, targetWidth) {
       pageBox.className = 'page-box';
@@ -1735,15 +1814,27 @@ export class BotoxPreviewPanel {
       btnNextPage.addEventListener('click', () => scrollToPage(currentPageIndex + 1));
     }
 
-    if (btnSlideMode) {
-      btnSlideMode.addEventListener('click', () => {
+    if (btnToggleSlides) {
+      btnToggleSlides.addEventListener('click', () => {
+        const nextVal = !currentIsSlides;
+        currentIsSlides = nextVal;
+        btnToggleSlides.classList.toggle('active', nextVal);
+        vscode.postMessage({
+          command: 'toggleDocumentSlides',
+          isSlides: nextVal
+        });
+      });
+    }
+
+    if (btnPresentMode) {
+      btnPresentMode.addEventListener('click', () => {
         isSlideMode = !isSlideMode;
         if (isSlideMode) {
-          btnSlideMode.classList.add('active');
+          btnPresentMode.classList.add('active');
           container.classList.add('slide-mode');
           updateSlideView();
         } else {
-          btnSlideMode.classList.remove('active');
+          btnPresentMode.classList.remove('active');
           container.classList.remove('slide-mode');
           const pages = container.querySelectorAll('.page-box');
           pages.forEach(p => p.classList.remove('active-slide'));
@@ -1810,7 +1901,7 @@ export class BotoxPreviewPanel {
         } else if (e.key === 'Escape') {
           e.preventDefault();
           isSlideMode = false;
-          if (btnSlideMode) btnSlideMode.classList.remove('active');
+          if (btnPresentMode) btnPresentMode.classList.remove('active');
           container.classList.remove('slide-mode');
           const pages = container.querySelectorAll('.page-box');
           pages.forEach(p => p.classList.remove('active-slide'));
@@ -1861,14 +1952,14 @@ export class BotoxPreviewPanel {
       const message = event.data;
       if (message.type === 'pages') {
         if (typeof message.isSlides === 'boolean') {
+          currentIsSlides = message.isSlides;
           renderThemeOptions(message.isSlides, message.activeTheme);
-          if (message.isSlides && !isSlideMode) {
-            isSlideMode = true;
-            if (btnSlideMode) btnSlideMode.classList.add('active');
-            container.classList.add('slide-mode');
-          } else if (message.isSlides === false && isSlideMode) {
+          if (btnToggleSlides) {
+            btnToggleSlides.classList.toggle('active', message.isSlides);
+          }
+          if (message.isSlides === false && isSlideMode) {
             isSlideMode = false;
-            if (btnSlideMode) btnSlideMode.classList.remove('active');
+            if (btnPresentMode) btnPresentMode.classList.remove('active');
             container.classList.remove('slide-mode');
             const pages = container.querySelectorAll('.page-box');
             pages.forEach(p => p.classList.remove('active-slide'));
