@@ -4,9 +4,77 @@ import { BotoxPreviewPanel } from './preview';
 import { compileDocument, runInit, setExtensionContext } from './compiler';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
+export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
+let statusBarItem: vscode.StatusBarItem;
+
+export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg?: string) {
+    if (!statusBarItem) return;
+    const config = vscode.workspace.getConfiguration('botox');
+    if (!config.get<boolean>('showStatusBarItem', true)) {
+        statusBarItem.hide();
+        return;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    const isMd = editor && (editor.document.languageId === 'markdown' || editor.document.fileName.endsWith('.md'));
+    const hasPanels = BotoxPreviewPanel.currentPanels.size > 0;
+
+    if (!isMd && !hasPanels) {
+        statusBarItem.hide();
+        return;
+    }
+
+    if (isError) {
+        statusBarItem.text = '$(error) Botox Error';
+        statusBarItem.tooltip = errorMsg || 'Botox compilation error';
+        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    } else if (durationMs !== undefined) {
+        statusBarItem.text = `$(book) Botox: ${durationMs}ms`;
+        statusBarItem.tooltip = `Last typeset in ${durationMs}ms (Click to open preview)`;
+        statusBarItem.backgroundColor = undefined;
+    } else {
+        statusBarItem.text = '$(book) Botox';
+        statusBarItem.tooltip = 'Click to open Botox live preview';
+        statusBarItem.backgroundColor = undefined;
+    }
+    statusBarItem.show();
+}
+
+export function reportCompilationSuccess(uri: vscode.Uri, durationMs?: number) {
+    botoxDiagnostics.delete(uri);
+    updateStatusBar(durationMs, false);
+}
+
+export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
+    updateStatusBar(undefined, true, errorMsg);
+
+    let line = 0;
+    const match = errorMsg.match(/(?:line|row)\s*(\d+)/i) || errorMsg.match(/:(\d+):(\d+)/);
+    if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (!isNaN(parsed) && parsed > 0) {
+            line = parsed - 1;
+        }
+    }
+    const range = new vscode.Range(line, 0, line, 100);
+    const diag = new vscode.Diagnostic(range, errorMsg, vscode.DiagnosticSeverity.Error);
+    diag.source = 'Botox';
+    botoxDiagnostics.set(uri, [diag]);
+}
 
 export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
+
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem.command = 'botox.openPreview';
+    context.subscriptions.push(statusBarItem);
+    context.subscriptions.push(botoxDiagnostics);
+
+    vscode.window.onDidChangeActiveTextEditor(() => updateStatusBar(), null, context.subscriptions);
+    vscode.workspace.onDidCloseTextDocument(doc => {
+        botoxDiagnostics.delete(doc.uri);
+    }, null, context.subscriptions);
+    updateStatusBar();
     // 1. Open Preview to the Side
     const openPreviewCmd = vscode.commands.registerCommand(
         'botox.openPreview',
@@ -56,6 +124,7 @@ export function activate(context: vscode.ExtensionContext) {
                 async () => {
                     const result = await compileDocument(inputPath, saveUri.fsPath);
                     if (result.success) {
+                        reportCompilationSuccess(documentUri, result.durationMs);
                         const openItem = 'Open PDF';
                         const action = await vscode.window.showInformationMessage(
                             `Botox: Compiled '${path.basename(saveUri.fsPath)}' in ${result.durationMs}ms`,
@@ -65,6 +134,7 @@ export function activate(context: vscode.ExtensionContext) {
                             vscode.env.openExternal(saveUri);
                         }
                     } else {
+                        reportCompilationFailure(documentUri, result.error || 'Compilation failed');
                         vscode.window.showErrorMessage(`Botox compilation failed: ${result.error}`);
                     }
                 }

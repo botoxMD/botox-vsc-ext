@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { abortActivePreview, compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
+import { reportCompilationSuccess, reportCompilationFailure } from './extension';
 
 export class BotoxPreviewPanel {
     public static currentPanels: Map<string, BotoxPreviewPanel> = new Map();
@@ -11,6 +12,8 @@ export class BotoxPreviewPanel {
     private _pendingCompile: boolean = false;
     private _pendingContent?: string;
     private _htmlInitialized: boolean = false;
+    private _lastHeadings: VectorHeadingInfo[] = [];
+    private _lastNumPages: number = 0;
 
     public static createOrShow(documentUri: vscode.Uri, viewColumn?: vscode.ViewColumn) {
         const key = documentUri.toString();
@@ -61,6 +64,9 @@ export class BotoxPreviewPanel {
                         config.update('syncScroll', !current, vscode.ConfigurationTarget.Global);
                         return;
                     }
+                    case 'jumpToSource':
+                        this.handleJumpToSource(message.pageIndex, message.yRatio, message.selectedText);
+                        return;
                 }
             },
             null,
@@ -68,6 +74,60 @@ export class BotoxPreviewPanel {
         );
 
         this.update();
+    }
+
+    private async handleJumpToSource(pageIndex: number, yRatio: number, selectedText?: string) {
+        const config = vscode.workspace.getConfiguration('botox');
+        if (!config.get<boolean>('reverseSync', true)) {
+            return;
+        }
+
+        try {
+            const doc = await vscode.workspace.openTextDocument(this._documentUri);
+            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+
+            let targetLine = -1;
+
+            if (selectedText && selectedText.length >= 3) {
+                const textLower = selectedText.toLowerCase();
+                for (let i = 0; i < doc.lineCount; i++) {
+                    const lineText = doc.lineAt(i).text.toLowerCase();
+                    if (lineText.includes(textLower)) {
+                        targetLine = i;
+                        break;
+                    }
+                }
+            }
+
+            if (targetLine < 0 && this._lastHeadings && this._lastHeadings.length > 0) {
+                let bestH: VectorHeadingInfo | null = null;
+                for (const h of this._lastHeadings) {
+                    if (h.page_index < pageIndex || (h.page_index === pageIndex && h.y_ratio <= yRatio + 0.05)) {
+                        bestH = h;
+                    }
+                }
+                if (bestH && bestH.text) {
+                    const cleanH = bestH.text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+                    for (let i = 0; i < doc.lineCount; i++) {
+                        const lineText = doc.lineAt(i).text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+                        if (lineText.includes(cleanH) || cleanH.includes(lineText)) {
+                            targetLine = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (targetLine < 0) {
+                const totalPages = Math.max(1, this._lastNumPages || 1);
+                const overallRatio = (pageIndex + yRatio) / totalPages;
+                targetLine = Math.min(Math.max(0, Math.floor(overallRatio * doc.lineCount)), doc.lineCount - 1);
+            }
+
+            const range = doc.lineAt(targetLine).range;
+            editor.selection = new vscode.Selection(range.start, range.start);
+            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+        } catch {}
     }
 
     public scrollToLine(
@@ -128,6 +188,9 @@ export class BotoxPreviewPanel {
             );
 
             if (result.success && result.pages) {
+                this._lastHeadings = result.headings || [];
+                this._lastNumPages = result.numPages || result.pages.length;
+                reportCompilationSuccess(this._documentUri, result.durationMs);
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;
                 if (!this._htmlInitialized) {
                     this._panel.webview.html = this._getHtmlForWebview(result.pages, result.headings || [], result.durationMs);
@@ -145,6 +208,7 @@ export class BotoxPreviewPanel {
                 return;
             } else {
                 const errMsg = result.error || 'Compilation failed with unknown error.';
+                reportCompilationFailure(this._documentUri, errMsg);
                 if (!this._htmlInitialized) {
                     this._panel.webview.html = this._getHtmlForWebview([], [], result.durationMs, errMsg);
                     this._htmlInitialized = true;
@@ -157,6 +221,7 @@ export class BotoxPreviewPanel {
             }
         } catch (e: any) {
             const errMsg = e.message || String(e);
+            reportCompilationFailure(this._documentUri, errMsg);
             if (!this._htmlInitialized) {
                 this._panel.webview.html = this._getHtmlForWebview([], [], undefined, errMsg);
                 this._htmlInitialized = true;
@@ -537,20 +602,57 @@ export class BotoxPreviewPanel {
       position: relative;
       flex-shrink: 0;
       transition: width 0.12s ease-out;
-      user-select: none;
-      -webkit-user-select: none;
+      user-select: text;
+      -webkit-user-select: text;
     }
     .page-box svg {
       width: 100% !important;
       height: 100% !important;
       display: block;
-      user-select: none;
-      -webkit-user-select: none;
-      pointer-events: none;
+      user-select: text;
+      -webkit-user-select: text;
+      pointer-events: auto;
     }
     .page-indicator {
       font-size: 11px;
       opacity: 0.85;
+    }
+    .page-nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+    }
+    .page-nav input {
+      width: 38px;
+      text-align: center;
+      background: var(--btn-bg);
+      border: 1px solid var(--toolbar-border);
+      color: var(--fg);
+      border-radius: 3px;
+      padding: 2px 4px;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    .page-nav input:focus {
+      outline: 1px solid var(--accent);
+      border-color: var(--accent);
+    }
+    #viewer-container.slide-mode {
+      padding: 0;
+      gap: 0;
+      overflow: hidden;
+      justify-content: center;
+      align-items: center;
+    }
+    #viewer-container.slide-mode .page-box {
+      display: none;
+      width: calc(100vw - 48px) !important;
+      max-height: calc(100vh - 80px);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+    }
+    #viewer-container.slide-mode .page-box.active-slide {
+      display: block;
     }
   </style>
 </head>
@@ -559,6 +661,7 @@ export class BotoxPreviewPanel {
     <div class="tool-group">
       <button id="btn-refresh" title="Reload typeset preview">Reload</button>
       <button id="btn-export" title="Compile PDF to file">Export PDF</button>
+      <button id="btn-slide-mode" title="Toggle Slide / Presentation View">Slide View</button>
       <span class="badge">Pure Vector</span>
     </div>
     <div class="tool-group">
@@ -576,7 +679,13 @@ export class BotoxPreviewPanel {
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>
         <span>Error</span>
       </button>
-      <span id="page-info" class="page-indicator">Loading...</span>
+      <button id="btn-prev-page" title="Previous Page (PageUp)">◂</button>
+      <span class="page-nav">
+        <input id="page-input" type="number" min="1" max="1" value="1" title="Type page number and press Enter" />
+        <span>/</span>
+        <span id="page-total">1</span>
+      </span>
+      <button id="btn-next-page" title="Next Page (PageDown)">▸</button>
       <span id="timing" class="timing-badge">${timingStr}</span>
     </div>
   </div>
@@ -608,7 +717,11 @@ export class BotoxPreviewPanel {
     const vscode = acquireVsCodeApi();
     const container = document.getElementById('viewer-container');
     const zoomLabel = document.getElementById('zoom-level');
-    const pageInfo = document.getElementById('page-info');
+    const pageInput = document.getElementById('page-input');
+    const pageTotal = document.getElementById('page-total');
+    const btnPrevPage = document.getElementById('btn-prev-page');
+    const btnNextPage = document.getElementById('btn-next-page');
+    const btnSlideMode = document.getElementById('btn-slide-mode');
     const timingBadge = document.getElementById('timing');
     const btnErrorBadge = document.getElementById('btn-error-badge');
     const errorHud = document.getElementById('error-hud');
@@ -718,7 +831,7 @@ export class BotoxPreviewPanel {
       errorHudPre.textContent = msg;
 
       if (renderedPageSvgs.length === 0) {
-        pageInfo.textContent = 'Compile error';
+        if (pageTotal) pageTotal.textContent = '!';
         errorHud.style.display = 'none';
         container.innerHTML =
           '<div class="full-error-container">' +
@@ -1026,6 +1139,9 @@ export class BotoxPreviewPanel {
       });
     }
 
+    let currentPageIndex = 0;
+    let isSlideMode = false;
+
     function setupPageBox(pageBox, svgContent, i, targetWidth) {
       pageBox.className = 'page-box';
       pageBox.id = 'page-' + (i + 1);
@@ -1049,9 +1165,58 @@ export class BotoxPreviewPanel {
         svgEl.style.width = '100%';
         svgEl.style.height = '100%';
         svgEl.style.display = 'block';
-        svgEl.style.userSelect = 'none';
-        svgEl.style.webkitUserSelect = 'none';
-        svgEl.style.pointerEvents = 'none';
+        svgEl.style.userSelect = 'text';
+        svgEl.style.webkitUserSelect = 'text';
+        svgEl.style.pointerEvents = 'auto';
+      }
+
+      pageBox.ondblclick = (e) => {
+        const sel = window.getSelection() ? window.getSelection().toString().trim() : '';
+        const rect = pageBox.getBoundingClientRect();
+        const clickY = e.clientY - rect.top;
+        const yRatio = rect.height > 0 ? Math.max(0, Math.min(1, clickY / rect.height)) : 0;
+        vscode.postMessage({
+          command: 'jumpToSource',
+          pageIndex: i,
+          yRatio: yRatio,
+          selectedText: sel
+        });
+      };
+    }
+
+    function updateSlideView() {
+      const pages = container.querySelectorAll('.page-box');
+      pages.forEach((p, idx) => {
+        if (idx === currentPageIndex) {
+          p.classList.add('active-slide');
+        } else {
+          p.classList.remove('active-slide');
+        }
+      });
+      if (pageInput) pageInput.value = currentPageIndex + 1;
+    }
+
+    function scrollToPage(pageIdx) {
+      if (cachedPageMetrics.length === 0) {
+        updatePageMetrics();
+      }
+      const total = cachedPageMetrics.length;
+      if (total === 0) return;
+      const clamped = Math.max(0, Math.min(pageIdx, total - 1));
+      currentPageIndex = clamped;
+      if (pageInput) pageInput.value = clamped + 1;
+
+      if (isSlideMode) {
+        updateSlideView();
+        return;
+      }
+
+      const m = cachedPageMetrics[clamped];
+      if (m) {
+        container.scrollTo({
+          top: m.top - 16,
+          behavior: 'smooth'
+        });
       }
     }
 
@@ -1066,7 +1231,11 @@ export class BotoxPreviewPanel {
       detectDocumentStructure();
 
       if (!pages || pages.length === 0) {
-        pageInfo.textContent = '0 pages';
+        if (pageTotal) pageTotal.textContent = '0';
+        if (pageInput) {
+          pageInput.value = '0';
+          pageInput.max = '0';
+        }
         container.innerHTML = '<div style="margin-top: 40px; opacity: 0.6;">No content to display.</div>';
         renderedPageSvgs = [];
         cachedPageMetrics = [];
@@ -1074,7 +1243,14 @@ export class BotoxPreviewPanel {
       }
 
       const total = pages.length;
-      pageInfo.textContent = total + (total === 1 ? ' page' : ' pages');
+      if (pageTotal) pageTotal.textContent = total;
+      if (pageInput) {
+        pageInput.max = total;
+        if (currentPageIndex >= total) {
+          currentPageIndex = Math.max(0, total - 1);
+        }
+        pageInput.value = currentPageIndex + 1;
+      }
 
       const targetWidth = calculatePageWidth();
       const prevScrollTop = container.scrollTop;
@@ -1113,12 +1289,80 @@ export class BotoxPreviewPanel {
 
       updatePageMetrics();
 
+      if (isSlideMode) {
+        updateSlideView();
+      }
+
       // Preserve relative reading position if total height shifted
       if (prevScrollHeight > 0 && prevScrollTop > 0 && Math.abs(container.scrollHeight - prevScrollHeight) > 10) {
         const scrollRatio = prevScrollTop / prevScrollHeight;
         container.scrollTop = scrollRatio * container.scrollHeight;
       }
     }
+
+    container.addEventListener('scroll', () => {
+      if (cachedPageMetrics.length === 0 || isSlideMode) return;
+      const scrollCenter = container.scrollTop + container.clientHeight / 2;
+      for (let i = 0; i < cachedPageMetrics.length; i++) {
+        const m = cachedPageMetrics[i];
+        if (scrollCenter >= m.top && scrollCenter <= m.top + m.height) {
+          if (currentPageIndex !== i) {
+            currentPageIndex = i;
+            if (pageInput) pageInput.value = i + 1;
+          }
+          break;
+        }
+      }
+    });
+
+    if (pageInput) {
+      pageInput.addEventListener('change', () => {
+        const val = parseInt(pageInput.value, 10);
+        if (!isNaN(val)) scrollToPage(val - 1);
+      });
+      pageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const val = parseInt(pageInput.value, 10);
+          if (!isNaN(val)) scrollToPage(val - 1);
+        }
+      });
+    }
+
+    if (btnPrevPage) {
+      btnPrevPage.addEventListener('click', () => scrollToPage(currentPageIndex - 1));
+    }
+    if (btnNextPage) {
+      btnNextPage.addEventListener('click', () => scrollToPage(currentPageIndex + 1));
+    }
+
+    if (btnSlideMode) {
+      btnSlideMode.addEventListener('click', () => {
+        isSlideMode = !isSlideMode;
+        if (isSlideMode) {
+          btnSlideMode.classList.add('active');
+          container.classList.add('slide-mode');
+          updateSlideView();
+        } else {
+          btnSlideMode.classList.remove('active');
+          container.classList.remove('slide-mode');
+          const pages = container.querySelectorAll('.page-box');
+          pages.forEach(p => p.classList.remove('active-slide'));
+          applyScaleToPages();
+          scrollToPage(currentPageIndex);
+        }
+      });
+    }
+
+    // Ctrl + Wheel / Pinch Zoom
+    container.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        isFitWidth = false;
+        const delta = e.deltaY < 0 ? 0.15 : -0.15;
+        currentScale = Math.max(0.35, Math.min(3.5, currentScale + delta));
+        applyScaleToPages();
+      }
+    }, { passive: false });
 
     // Zoom controls
     document.getElementById('btn-zoom-in').addEventListener('click', () => {
@@ -1154,6 +1398,38 @@ export class BotoxPreviewPanel {
 
     // Keyboard shortcuts in webview
     window.addEventListener('keydown', (e) => {
+      if (isSlideMode) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+          e.preventDefault();
+          scrollToPage(currentPageIndex + 1);
+          return;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
+          e.preventDefault();
+          scrollToPage(currentPageIndex - 1);
+          return;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          isSlideMode = false;
+          if (btnSlideMode) btnSlideMode.classList.remove('active');
+          container.classList.remove('slide-mode');
+          const pages = container.querySelectorAll('.page-box');
+          pages.forEach(p => p.classList.remove('active-slide'));
+          applyScaleToPages();
+          scrollToPage(currentPageIndex);
+          return;
+        }
+      } else {
+        if (e.key === 'PageDown') {
+          e.preventDefault();
+          scrollToPage(currentPageIndex + 1);
+          return;
+        } else if (e.key === 'PageUp') {
+          e.preventDefault();
+          scrollToPage(currentPageIndex - 1);
+          return;
+        }
+      }
+
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
         isFitWidth = false;
