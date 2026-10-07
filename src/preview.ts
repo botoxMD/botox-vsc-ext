@@ -1015,6 +1015,9 @@ export class BotoxPreviewPanel {
     body[data-theme="oled"] .page-box svg image {
       filter: invert(1) hue-rotate(180deg);
     }
+    #viewer-container:not(.slide-mode) .page-box.pause-step {
+      display: none !important;
+    }
     #viewer-container.slide-mode {
       padding: 0;
       gap: 0;
@@ -1023,13 +1026,13 @@ export class BotoxPreviewPanel {
       align-items: center;
     }
     #viewer-container.slide-mode .page-box {
-      display: none;
+      display: none !important;
       width: calc(100vw - 48px) !important;
       max-height: calc(100vh - 80px);
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
     }
     #viewer-container.slide-mode .page-box.active-slide {
-      display: block;
+      display: block !important;
     }
   </style>
 </head>
@@ -1338,6 +1341,10 @@ export class BotoxPreviewPanel {
       const pages = container.querySelectorAll('.page-box');
       cachedPageMetrics = [];
       for (let i = 0; i < pages.length; i++) {
+        if (!isSlideMode && pages[i].classList.contains('pause-step')) {
+          cachedPageMetrics.push({ top: 0, height: 0 });
+          continue;
+        }
         const r = pages[i].getBoundingClientRect();
         cachedPageMetrics.push({
           top: r.top - containerRect.top + container.scrollTop,
@@ -1606,7 +1613,8 @@ export class BotoxPreviewPanel {
     let isSlideMode = false;
 
     function setupPageBox(pageBox, svgContent, i, targetWidth) {
-      pageBox.className = 'page-box';
+      const isPauseStep = svgContent.includes('data-pause-step="true"') || svgContent.includes('pause-step');
+      pageBox.className = isPauseStep ? 'page-box pause-step' : 'page-box';
       pageBox.id = 'page-' + (i + 1);
       pageBox.style.width = targetWidth + 'px';
 
@@ -1663,6 +1671,45 @@ export class BotoxPreviewPanel {
       });
     });
 
+    function getNextVisibleIndex(idx) {
+      const pages = container.querySelectorAll('.page-box');
+      for (let i = idx + 1; i < pages.length; i++) {
+        if (!pages[i].classList.contains('pause-step')) return i;
+      }
+      return idx;
+    }
+
+    function getPrevVisibleIndex(idx) {
+      const pages = container.querySelectorAll('.page-box');
+      for (let i = idx - 1; i >= 0; i--) {
+        if (!pages[i].classList.contains('pause-step')) return i;
+      }
+      return idx;
+    }
+
+    function updatePageIndicator() {
+      if (!pageInput || !pageTotal) return;
+      const allPages = container.querySelectorAll('.page-box');
+      if (allPages.length === 0) {
+        pageInput.value = '0';
+        pageTotal.textContent = '0';
+        return;
+      }
+      if (isSlideMode) {
+        pageTotal.textContent = allPages.length;
+        pageInput.max = allPages.length;
+        pageInput.value = currentPageIndex + 1;
+      } else {
+        const visiblePages = Array.from(allPages).filter(p => !p.classList.contains('pause-step'));
+        const totalVisible = visiblePages.length > 0 ? visiblePages.length : allPages.length;
+        pageTotal.textContent = totalVisible;
+        pageInput.max = totalVisible;
+        const curBox = allPages[currentPageIndex];
+        const vIdx = visiblePages.indexOf(curBox);
+        pageInput.value = (vIdx >= 0 ? vIdx : 0) + 1;
+      }
+    }
+
     function updateSlideView() {
       const pages = container.querySelectorAll('.page-box');
       pages.forEach((p, idx) => {
@@ -1672,7 +1719,7 @@ export class BotoxPreviewPanel {
           p.classList.remove('active-slide');
         }
       });
-      if (pageInput) pageInput.value = currentPageIndex + 1;
+      updatePageIndicator();
     }
 
     function scrollToPage(pageIdx) {
@@ -1683,7 +1730,7 @@ export class BotoxPreviewPanel {
       if (total === 0) return;
       const clamped = Math.max(0, Math.min(pageIdx, total - 1));
       currentPageIndex = clamped;
-      if (pageInput) pageInput.value = clamped + 1;
+      updatePageIndicator();
 
       if (isSlideMode) {
         updateSlideView();
@@ -1691,7 +1738,7 @@ export class BotoxPreviewPanel {
       }
 
       const m = cachedPageMetrics[clamped];
-      if (m) {
+      if (m && m.height > 0) {
         container.scrollTo({
           top: m.top - 16,
           behavior: 'smooth'
@@ -1721,14 +1768,8 @@ export class BotoxPreviewPanel {
         return;
       }
 
-      const total = pages.length;
-      if (pageTotal) pageTotal.textContent = total;
-      if (pageInput) {
-        pageInput.max = total;
-        if (currentPageIndex >= total) {
-          currentPageIndex = Math.max(0, total - 1);
-        }
-        pageInput.value = currentPageIndex + 1;
+      if (currentPageIndex >= pages.length) {
+        currentPageIndex = Math.max(0, pages.length - 1);
       }
 
       const targetWidth = calculatePageWidth();
@@ -1770,6 +1811,8 @@ export class BotoxPreviewPanel {
 
       if (isSlideMode) {
         updateSlideView();
+      } else {
+        updatePageIndicator();
       }
 
       // Preserve relative reading position if total height shifted
@@ -1784,10 +1827,11 @@ export class BotoxPreviewPanel {
       const scrollCenter = container.scrollTop + container.clientHeight / 2;
       for (let i = 0; i < cachedPageMetrics.length; i++) {
         const m = cachedPageMetrics[i];
+        if (m.height === 0) continue;
         if (scrollCenter >= m.top && scrollCenter <= m.top + m.height) {
           if (currentPageIndex !== i) {
             currentPageIndex = i;
-            if (pageInput) pageInput.value = i + 1;
+            updatePageIndicator();
           }
           break;
         }
@@ -1797,21 +1841,36 @@ export class BotoxPreviewPanel {
     if (pageInput) {
       pageInput.addEventListener('change', () => {
         const val = parseInt(pageInput.value, 10);
-        if (!isNaN(val)) scrollToPage(val - 1);
+        if (isNaN(val)) return;
+        if (isSlideMode) {
+          scrollToPage(val - 1);
+        } else {
+          const visiblePages = Array.from(container.querySelectorAll('.page-box:not(.pause-step)'));
+          const targetBox = visiblePages[val - 1];
+          if (targetBox) {
+            const allPages = Array.from(container.querySelectorAll('.page-box'));
+            scrollToPage(allPages.indexOf(targetBox));
+          }
+        }
       });
       pageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-          const val = parseInt(pageInput.value, 10);
-          if (!isNaN(val)) scrollToPage(val - 1);
+          pageInput.dispatchEvent(new Event('change'));
         }
       });
     }
 
     if (btnPrevPage) {
-      btnPrevPage.addEventListener('click', () => scrollToPage(currentPageIndex - 1));
+      btnPrevPage.addEventListener('click', () => {
+        const nextIdx = isSlideMode ? currentPageIndex - 1 : getPrevVisibleIndex(currentPageIndex);
+        scrollToPage(nextIdx);
+      });
     }
     if (btnNextPage) {
-      btnNextPage.addEventListener('click', () => scrollToPage(currentPageIndex + 1));
+      btnNextPage.addEventListener('click', () => {
+        const nextIdx = isSlideMode ? currentPageIndex + 1 : getNextVisibleIndex(currentPageIndex);
+        scrollToPage(nextIdx);
+      });
     }
 
     if (btnToggleSlides) {
@@ -1838,8 +1897,12 @@ export class BotoxPreviewPanel {
           container.classList.remove('slide-mode');
           const pages = container.querySelectorAll('.page-box');
           pages.forEach(p => p.classList.remove('active-slide'));
+          if (pages[currentPageIndex] && pages[currentPageIndex].classList.contains('pause-step')) {
+            currentPageIndex = getNextVisibleIndex(currentPageIndex);
+          }
           applyScaleToPages();
           scrollToPage(currentPageIndex);
+          updatePageIndicator();
         }
       });
     }
@@ -1905,18 +1968,22 @@ export class BotoxPreviewPanel {
           container.classList.remove('slide-mode');
           const pages = container.querySelectorAll('.page-box');
           pages.forEach(p => p.classList.remove('active-slide'));
+          if (pages[currentPageIndex] && pages[currentPageIndex].classList.contains('pause-step')) {
+            currentPageIndex = getNextVisibleIndex(currentPageIndex);
+          }
           applyScaleToPages();
           scrollToPage(currentPageIndex);
+          updatePageIndicator();
           return;
         }
       } else {
         if (e.key === 'PageDown') {
           e.preventDefault();
-          scrollToPage(currentPageIndex + 1);
+          scrollToPage(getNextVisibleIndex(currentPageIndex));
           return;
         } else if (e.key === 'PageUp') {
           e.preventDefault();
-          scrollToPage(currentPageIndex - 1);
+          scrollToPage(getPrevVisibleIndex(currentPageIndex));
           return;
         }
       }

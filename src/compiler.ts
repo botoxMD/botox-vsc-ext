@@ -25,6 +25,7 @@ export interface VectorCompilationResult {
     headings?: VectorHeadingInfo[];
     numPages?: number;
     isSlides?: boolean;
+    pauseIndices?: number[];
     error?: string;
     durationMs?: number;
 }
@@ -343,6 +344,7 @@ export async function compileForPreview(
                     headings: parsed.headings || [],
                     numPages: parsed.num_pages || parsed.pages?.length || 0,
                     isSlides,
+                    pauseIndices: parsed.pause_indices || [],
                     durationMs
                 });
             } catch (e: any) {
