@@ -589,7 +589,7 @@ export class BotoxPreviewPanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 50vh 16px 50vh;
+      padding: 24px 16px 48px;
       gap: 20px;
       scroll-behavior: smooth;
     }
@@ -826,7 +826,7 @@ export class BotoxPreviewPanel {
       currentErrorMessage = msg || '';
       btnErrorBadge.style.display = 'inline-flex';
 
-      const firstLine = (msg || '').split('\n')[0] || 'Compilation error';
+      const firstLine = (msg || '').split(String.fromCharCode(10))[0] || 'Compilation error';
       errorHudText.textContent = firstLine;
       errorHudPre.textContent = msg;
 
@@ -960,7 +960,7 @@ export class BotoxPreviewPanel {
     function findBestHeading(query, targetRatio, totalPages) {
       if (!query || query.length < 3 || documentHeadings.length === 0) return null;
 
-      const cleanQuery = query.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cleanQuery = query.toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
       if (cleanQuery.length < 3) return null;
 
       const words = cleanQuery.split(' ').filter(w => w.length >= 3);
@@ -975,7 +975,7 @@ export class BotoxPreviewPanel {
           continue;
         }
 
-        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanH = (h.text || '').toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
         if (cleanH.length < 2) continue;
 
         let score = 0;
@@ -1009,13 +1009,13 @@ export class BotoxPreviewPanel {
 
     function getHeadingPosition(headingText) {
       if (!headingText || documentHeadings.length === 0 || cachedPageMetrics.length === 0) return null;
-      const cleanTarget = headingText.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cleanTarget = headingText.toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
       if (cleanTarget.length < 2) return null;
 
       // Priority 1: Exact match
       for (const h of documentHeadings) {
         if (hasToc && h.page_index < firstBodyPage) continue;
-        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanH = (h.text || '').toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
         if (cleanH === cleanTarget) {
           if (h.page_index < cachedPageMetrics.length) {
             const m = cachedPageMetrics[h.page_index];
@@ -1027,7 +1027,7 @@ export class BotoxPreviewPanel {
       // Priority 2: Substring match
       for (const h of documentHeadings) {
         if (hasToc && h.page_index < firstBodyPage) continue;
-        const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanH = (h.text || '').toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
         if (cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
           if (h.page_index < cachedPageMetrics.length) {
             const m = cachedPageMetrics[h.page_index];
@@ -1072,7 +1072,7 @@ export class BotoxPreviewPanel {
         // Look for subsequent heading in documentHeadings even if not in .md (e.g. References)
         let nextDocHeadingPos = null;
         let foundPrev = false;
-        const cleanTarget = prevHeading.text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanTarget = prevHeading.text.toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
 
         for (const h of documentHeadings) {
           if (foundPrev) {
@@ -1082,7 +1082,7 @@ export class BotoxPreviewPanel {
             }
             break;
           }
-          const cleanH = (h.text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+          const cleanH = (h.text || '').toLowerCase().replace(/[^a-z0-9 ]/gi, ' ').replace(/[ ]+/g, ' ').trim();
           if (cleanH === cleanTarget || cleanH.includes(cleanTarget) || cleanTarget.includes(cleanH)) {
             foundPrev = true;
           }
@@ -1147,7 +1147,7 @@ export class BotoxPreviewPanel {
       pageBox.id = 'page-' + (i + 1);
       pageBox.style.width = targetWidth + 'px';
 
-      const vbMatch = svgContent.match(/viewBox=["']([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)["']/);
+      const vbMatch = svgContent.match(/viewBox=["']([0-9.]+)[ ]+([0-9.]+)[ ]+([0-9.]+)[ ]+([0-9.]+)["']/);
       if (vbMatch) {
         const vbWidth = parseFloat(vbMatch[3]);
         const vbHeight = parseFloat(vbMatch[4]);
