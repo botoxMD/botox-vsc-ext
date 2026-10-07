@@ -34,6 +34,14 @@ export function setExtensionContext(context: vscode.ExtensionContext) {
     extensionContext = context;
 }
 
+export function cleanCompilerError(raw: string): string {
+    let clean = (raw || '').trim();
+    clean = clean.replace(/^Error compiling Typst to vector preview:\s*/i, '');
+    clean = clean.replace(/^Error compiling to PDF:\s*/i, '');
+    clean = clean.replace(/^Error:\s*/i, '');
+    return clean.trim();
+}
+
 export function resolveBotoxBinary(): string {
     const isWin = process.platform === 'win32';
     const binName = isWin ? 'botox.exe' : 'botox';
@@ -297,7 +305,7 @@ export async function compileForPreview(
             if (code !== 0) {
                 resolve({
                     success: false,
-                    error: (stderr || stdout || `Process exited with code ${code}`).trim(),
+                    error: cleanCompilerError(stderr || stdout || `Process exited with code ${code}`),
                     durationMs
                 });
                 return;
@@ -375,7 +383,7 @@ export async function compileDocument(
                     const message = stderr || stdout || error.message;
                     resolve({
                         success: false,
-                        error: message.trim(),
+                        error: cleanCompilerError(message),
                         durationMs
                     });
                     return;

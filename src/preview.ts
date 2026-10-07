@@ -144,16 +144,28 @@ export class BotoxPreviewPanel {
                 // Aborted because a newer compile was triggered; suppress error
                 return;
             } else {
-                this._panel.webview.postMessage({
-                    type: 'error',
-                    message: result.error || 'Compilation failed with unknown error.'
-                });
+                const errMsg = result.error || 'Compilation failed with unknown error.';
+                if (!this._htmlInitialized) {
+                    this._panel.webview.html = this._getHtmlForWebview([], [], result.durationMs, errMsg);
+                    this._htmlInitialized = true;
+                } else {
+                    this._panel.webview.postMessage({
+                        type: 'error',
+                        message: errMsg
+                    });
+                }
             }
         } catch (e: any) {
-            this._panel.webview.postMessage({
-                type: 'error',
-                message: e.message || String(e)
-            });
+            const errMsg = e.message || String(e);
+            if (!this._htmlInitialized) {
+                this._panel.webview.html = this._getHtmlForWebview([], [], undefined, errMsg);
+                this._htmlInitialized = true;
+            } else {
+                this._panel.webview.postMessage({
+                    type: 'error',
+                    message: errMsg
+                });
+            }
         } finally {
             this._isCompiling = false;
             if (this._pendingCompile) {
@@ -177,11 +189,12 @@ export class BotoxPreviewPanel {
         }
     }
 
-    private _getHtmlForWebview(initialPages: string[], initialHeadings: VectorHeadingInfo[] = [], durationMs?: number): string {
+    private _getHtmlForWebview(initialPages: string[], initialHeadings: VectorHeadingInfo[] = [], durationMs?: number, initialError?: string): string {
         const title = path.basename(this._documentUri.fsPath);
         const timingStr = durationMs ? `${durationMs}ms` : '';
         const pagesJson = JSON.stringify(initialPages);
         const headingsJson = JSON.stringify(initialHeadings);
+        const initialErrorJson = JSON.stringify(initialError || null);
         const initialSync = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
 
         return `<!DOCTYPE html>
@@ -282,15 +295,34 @@ export class BotoxPreviewPanel {
     }
     #error-banner {
       display: none;
-      background: #7f1d1d;
+      background: #450a0a;
       color: #fecaca;
       padding: 10px 14px;
-      font-family: monospace;
       font-size: 12px;
-      border-bottom: 1px solid #b91c1c;
-      white-space: pre-wrap;
-      max-height: 180px;
+      border-bottom: 1px solid #991b1b;
+      max-height: 220px;
       overflow-y: auto;
+      z-index: 99;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .error-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #f87171;
+    }
+    .error-body {
+      white-space: pre-wrap;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 11px;
+      line-height: 1.45;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 8px 10px;
+      border-radius: 4px;
+      user-select: text;
+      -webkit-user-select: text;
     }
     #viewer-container {
       flex: 1;
@@ -388,14 +420,25 @@ export class BotoxPreviewPanel {
       vscode.postMessage({ command: 'toggleSyncScroll' });
     });
 
+    function escapeHtml(str) {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function showError(msg) {
-      errorBanner.textContent = msg;
+      errorBanner.innerHTML = '<div class="error-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>Botox Compilation Error</div><div class="error-body">' + escapeHtml(msg) + '</div>';
       errorBanner.style.display = 'block';
+      if (cachedPageMetrics.length === 0) {
+        pageInfo.textContent = 'Compile error';
+      }
     }
 
     function hideError() {
       errorBanner.style.display = 'none';
-      errorBanner.textContent = '';
+      errorBanner.innerHTML = '';
     }
 
     function calculatePageWidth() {
@@ -847,7 +890,11 @@ export class BotoxPreviewPanel {
     // Initial render from embedded data
     const initialPages = ${pagesJson};
     const initialHeadings = ${headingsJson};
+    const initialError = ${initialErrorJson};
     renderPages(initialPages, initialHeadings, ${durationMs || 0});
+    if (initialError) {
+      showError(initialError);
+    }
   </script>
 </body>
 </html>`;
