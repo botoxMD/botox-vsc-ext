@@ -293,36 +293,229 @@ export class BotoxPreviewPanel {
       font-size: 11px;
       font-variant-numeric: tabular-nums;
     }
-    #error-banner {
+    #btn-error-badge {
       display: none;
-      background: #450a0a;
-      color: #fecaca;
-      padding: 10px 14px;
-      font-size: 12px;
-      border-bottom: 1px solid #991b1b;
-      max-height: 220px;
-      overflow-y: auto;
-      z-index: 99;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    }
-    .error-title {
+      background: #7f1d1d;
+      color: #fca5a5;
+      border: 1px solid #ef4444;
       font-weight: 600;
-      margin-bottom: 6px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      align-items: center;
+      gap: 5px;
+    }
+    #btn-error-badge:hover {
+      background: #991b1b;
+      color: #ffffff;
+    }
+
+    /* Full-screen Error Card when no pages rendered */
+    .full-error-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      min-height: 60vh;
+      padding: 40px 20px;
+    }
+    .full-error-card {
+      background: rgba(30, 20, 20, 0.85);
+      border: 1px solid #7f1d1d;
+      border-radius: 12px;
+      padding: 32px 36px;
+      max-width: 820px;
+      width: 100%;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(12px);
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    .full-error-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+    }
+    .full-error-icon {
+      background: rgba(239, 68, 68, 0.15);
+      padding: 10px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .full-error-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f87171;
+      letter-spacing: -0.2px;
+    }
+    .full-error-sub {
+      font-size: 12px;
+      color: var(--fg);
+      opacity: 0.75;
+      margin-top: 3px;
+    }
+    .full-error-code {
+      background: #0d1117;
+      color: #fecaca;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 18px 20px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      max-height: 52vh;
+      overflow-y: auto;
+      margin-bottom: 22px;
+    }
+    .full-error-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .full-error-actions button {
+      padding: 6px 14px;
+      font-size: 12px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .full-error-actions button.primary {
+      background: #dc2626;
+      color: #ffffff;
+      border: 1px solid transparent;
+    }
+    .full-error-actions button.primary:hover {
+      background: #b91c1c;
+    }
+    .full-error-hint {
+      font-size: 11px;
+      color: var(--fg);
+      opacity: 0.7;
+      line-height: 1.5;
+    }
+    .full-error-hint code {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+
+    /* Floating Error HUD at bottom when pages are active */
+    #error-hud {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 40px);
+      max-width: 860px;
+      background: rgba(20, 10, 10, 0.95);
+      border: 1px solid #dc2626;
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(16px);
+      z-index: 1000;
+      overflow: hidden;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .error-hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 14px;
+      cursor: pointer;
+      user-select: none;
+      background: rgba(220, 38, 38, 0.15);
+      border-bottom: 1px solid transparent;
+    }
+    #error-hud.expanded .error-hud-header {
+      border-bottom-color: rgba(220, 38, 38, 0.3);
+    }
+    .error-hud-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .error-hud-badge {
+      background: #dc2626;
+      color: #ffffff;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .error-hud-text {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 11px;
+      color: #fecaca;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .error-hud-controls {
       display: flex;
       align-items: center;
       gap: 6px;
-      color: #f87171;
+      flex-shrink: 0;
+      margin-left: 12px;
     }
-    .error-body {
-      white-space: pre-wrap;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 11px;
-      line-height: 1.45;
-      background: rgba(0, 0, 0, 0.25);
-      padding: 8px 10px;
+    .hud-btn {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fecaca;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 3px 8px;
       border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .hud-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+    }
+    .error-hud-body {
+      display: none;
+      padding: 12px 16px;
+      max-height: 48vh;
+      overflow-y: auto;
       user-select: text;
       -webkit-user-select: text;
+    }
+    #error-hud.expanded .error-hud-body {
+      display: block;
+    }
+    .error-hud-pre {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #fca5a5;
+      white-space: pre-wrap;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .error-hud-footer {
+      margin-top: 10px;
+      font-size: 11px;
+      opacity: 0.65;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     #viewer-container {
       flex: 1;
@@ -379,13 +572,37 @@ export class BotoxPreviewPanel {
       <button id="btn-zoom-fit" title="Fit to Available Width">Fit Width</button>
     </div>
     <div class="tool-group">
+      <button id="btn-error-badge" title="Toggle Error Details">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>
+        <span>Error</span>
+      </button>
       <span id="page-info" class="page-indicator">Loading...</span>
       <span id="timing" class="timing-badge">${timingStr}</span>
     </div>
   </div>
 
-  <div id="error-banner"></div>
   <div id="viewer-container"></div>
+
+  <div id="error-hud">
+    <div class="error-hud-header" id="error-hud-header">
+      <div class="error-hud-summary">
+        <span class="error-hud-badge">Build Error</span>
+        <span class="error-hud-text" id="error-hud-text"></span>
+      </div>
+      <div class="error-hud-controls">
+        <button id="btn-hud-expand" class="hud-btn">Details ▾</button>
+        <button id="btn-hud-copy" class="hud-btn">Copy</button>
+        <button id="btn-hud-close" class="hud-btn" title="Dismiss HUD">✕</button>
+      </div>
+    </div>
+    <div class="error-hud-body" id="error-hud-body">
+      <div class="error-hud-pre" id="error-hud-pre"></div>
+      <div class="error-hud-footer">
+        <span>Fix syntax or markup in editor to automatically resume live typesetting.</span>
+        <button id="btn-hud-copy2" class="hud-btn">Copy Full Error</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const vscode = acquireVsCodeApi();
@@ -393,10 +610,19 @@ export class BotoxPreviewPanel {
     const zoomLabel = document.getElementById('zoom-level');
     const pageInfo = document.getElementById('page-info');
     const timingBadge = document.getElementById('timing');
-    const errorBanner = document.getElementById('error-banner');
+    const btnErrorBadge = document.getElementById('btn-error-badge');
+    const errorHud = document.getElementById('error-hud');
+    const errorHudHeader = document.getElementById('error-hud-header');
+    const errorHudText = document.getElementById('error-hud-text');
+    const errorHudPre = document.getElementById('error-hud-pre');
+    const btnHudExpand = document.getElementById('btn-hud-expand');
+    const btnHudCopy = document.getElementById('btn-hud-copy');
+    const btnHudCopy2 = document.getElementById('btn-hud-copy2');
+    const btnHudClose = document.getElementById('btn-hud-close');
     const btnFit = document.getElementById('btn-zoom-fit');
     const btnSync = document.getElementById('btn-sync');
 
+    let currentErrorMessage = '';
     let currentScale = 1.0;
     let isFitWidth = false;
     let syncScrollEnabled = ${initialSync};
@@ -420,6 +646,61 @@ export class BotoxPreviewPanel {
       vscode.postMessage({ command: 'toggleSyncScroll' });
     });
 
+    function copyToClipboard(text, btnElement) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          if (btnElement) {
+            const orig = btnElement.textContent;
+            btnElement.textContent = '✓ Copied';
+            setTimeout(() => { btnElement.textContent = orig; }, 2000);
+          }
+        });
+      }
+    }
+
+    btnHudCopy.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyToClipboard(currentErrorMessage, btnHudCopy);
+    });
+    btnHudCopy2.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyToClipboard(currentErrorMessage, btnHudCopy2);
+    });
+
+    function toggleHudDetails(forceState) {
+      const isExpanded = forceState !== undefined ? forceState : !errorHud.classList.contains('expanded');
+      if (isExpanded) {
+        errorHud.classList.add('expanded');
+        btnHudExpand.textContent = 'Collapse ▴';
+      } else {
+        errorHud.classList.remove('expanded');
+        btnHudExpand.textContent = 'Details ▾';
+      }
+    }
+
+    errorHudHeader.addEventListener('click', () => {
+      toggleHudDetails();
+    });
+
+    btnHudExpand.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleHudDetails();
+    });
+
+    btnHudClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      errorHud.style.display = 'none';
+    });
+
+    btnErrorBadge.addEventListener('click', () => {
+      if (errorHud.style.display === 'none') {
+        errorHud.style.display = 'block';
+        toggleHudDetails(true);
+      } else {
+        toggleHudDetails();
+      }
+    });
+
     function escapeHtml(str) {
       return (str || '')
         .replace(/&/g, '&amp;')
@@ -429,16 +710,54 @@ export class BotoxPreviewPanel {
     }
 
     function showError(msg) {
-      errorBanner.innerHTML = '<div class="error-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>Botox Compilation Error</div><div class="error-body">' + escapeHtml(msg) + '</div>';
-      errorBanner.style.display = 'block';
-      if (cachedPageMetrics.length === 0) {
+      currentErrorMessage = msg || '';
+      btnErrorBadge.style.display = 'inline-flex';
+
+      const firstLine = (msg || '').split('\n')[0] || 'Compilation error';
+      errorHudText.textContent = firstLine;
+      errorHudPre.textContent = msg;
+
+      if (renderedPageSvgs.length === 0) {
         pageInfo.textContent = 'Compile error';
+        errorHud.style.display = 'none';
+        container.innerHTML =
+          '<div class="full-error-container">' +
+            '<div class="full-error-card">' +
+              '<div class="full-error-header">' +
+                '<div class="full-error-icon">' +
+                  '<svg width="24" height="24" viewBox="0 0 16 16" fill="#ef4444"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>' +
+                '</div>' +
+                '<div>' +
+                  '<div class="full-error-title">Typesetting Failed</div>' +
+                  '<div class="full-error-sub">Typst encountered an issue compiling your Markdown</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="full-error-code">' + escapeHtml(msg) + '</div>' +
+              '<div class="full-error-actions">' +
+                '<button id="btn-full-copy" class="primary">Copy Error Details</button>' +
+                '<button id="btn-full-retry">Retry Compilation</button>' +
+              '</div>' +
+              '<div class="full-error-hint">' +
+                '<strong>Tip:</strong> Check for unclosed delimiters (*, _, [, ]), unescaped $, or frontmatter YAML formatting.' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        document.getElementById('btn-full-copy')?.addEventListener('click', function() {
+          copyToClipboard(currentErrorMessage, this);
+        });
+        document.getElementById('btn-full-retry')?.addEventListener('click', () => {
+          vscode.postMessage({ command: 'refresh' });
+        });
+      } else {
+        errorHud.style.display = 'block';
       }
     }
 
     function hideError() {
-      errorBanner.style.display = 'none';
-      errorBanner.innerHTML = '';
+      currentErrorMessage = '';
+      btnErrorBadge.style.display = 'none';
+      errorHud.style.display = 'none';
+      errorHud.classList.remove('expanded');
     }
 
     function calculatePageWidth() {
