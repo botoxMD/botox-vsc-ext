@@ -53,31 +53,31 @@ export function resolveBotoxBinary(): string {
         return customPath;
     }
 
+    // 2. Standard user local binary path (~/.local/bin/botox)
+    const homeLocalBin = path.join(os.homedir(), '.local', 'bin', binName);
+    if (fs.existsSync(homeLocalBin)) {
+        return homeLocalBin;
+    }
+
     if (extensionContext) {
-        // 2. Bundled binary inside the extension's `bin/` directory
+        // 3. Bundled binary inside the extension's `bin/` directory
         const directBundled = path.join(extensionContext.extensionPath, 'bin', binName);
         if (fs.existsSync(directBundled)) {
             return directBundled;
         }
 
-        // 3. Platform/arch-specific bundled directory (e.g. `bin/linux-x64/botox`)
+        // 4. Platform/arch-specific bundled directory (e.g. `bin/linux-x64/botox`)
         const platformArch = `${process.platform}-${process.arch}`;
         const archBundled = path.join(extensionContext.extensionPath, 'bin', platformArch, binName);
         if (fs.existsSync(archBundled)) {
             return archBundled;
         }
 
-        // 4. Downloaded/cached binary in VS Code global storage
+        // 5. Downloaded/cached binary in VS Code global storage
         const storageBin = path.join(extensionContext.globalStorageUri.fsPath, 'bin', binName);
         if (fs.existsSync(storageBin)) {
             return storageBin;
         }
-    }
-
-    // 5. Standard user local binary path
-    const homeLocalBin = path.join(os.homedir(), '.local', 'bin', binName);
-    if (fs.existsSync(homeLocalBin)) {
-        return homeLocalBin;
     }
 
     return binName;
@@ -130,7 +130,7 @@ function downloadFile(url: string, dest: string): Promise<void> {
 }
 
 function fetchReleaseAssetUrl(target: string, ext: string): Promise<string> {
-    const fallback = `https://github.com/botoxMD/botox-cli/releases/latest/download/botox-v0.1.0-${target}.${ext}`;
+    const fallback = `https://github.com/botoxMD/botox-cli/releases/latest/download/botox-v0.1.1-${target}.${ext}`;
     return new Promise((resolve) => {
         https.get('https://api.github.com/repos/botoxMD/botox-cli/releases/latest', {
             headers: { 'User-Agent': 'vscode-botox' }
