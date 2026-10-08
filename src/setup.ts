@@ -92,7 +92,9 @@ slides:
 `;
 }
 
-export async function runSetupWizard(context: vscode.ExtensionContext) {
+export const SETUP_COMPLETED_KEY = 'botox.setupCompletedV1';
+
+export async function runSetupWizard(context: vscode.ExtensionContext, isFirstRun: boolean = false) {
     const globalPath = getGlobalConfigPath();
     const existing = parseExistingConfig(globalPath);
 
@@ -104,19 +106,33 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
     const defaultToc = existing.toc ?? false;
     const defaultBib = existing.bibliography ?? true;
 
+    const wizardTitlePrefix = isFirstRun ? 'Welcome to Botox! Setup Wizard' : 'Botox Setup';
+
     // Step 1: Author name
     const author = await vscode.window.showInputBox({
-        title: 'Botox Setup (1/6): Default Author Name',
+        title: `${wizardTitlePrefix} (1/6): Default Author Name`,
         prompt: 'Enter your name to be pre-filled in new documents and presentations',
         value: defaultAuthor,
         ignoreFocusOut: true,
         validateInput: (val) => val.trim().length === 0 ? 'Author name cannot be empty' : null
     });
-    if (author === undefined) return;
+    if (author === undefined) {
+        if (isFirstRun) {
+            vscode.window.showInformationMessage(
+                'Botox setup was postponed. You can configure defaults anytime from the Command Palette ("Botox: Configure Defaults").',
+                'Open Setup Wizard'
+            ).then(c => {
+                if (c === 'Open Setup Wizard') {
+                    runSetupWizard(context, false);
+                }
+            });
+        }
+        return;
+    }
 
     // Step 2: Affiliation / Organization
     const affiliation = await vscode.window.showInputBox({
-        title: 'Botox Setup (2/6): Affiliation / Organization (Optional)',
+        title: `${wizardTitlePrefix} (2/6): Affiliation / Organization (Optional)`,
         prompt: 'Enter your university, institute, or organization (or leave blank)',
         value: defaultAffiliation,
         ignoreFocusOut: true
@@ -133,7 +149,7 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
         { label: 'minimal', description: 'Unadorned, pure typographic layout', picked: defaultDocTheme === 'minimal' }
     ];
     const chosenDocTheme = await vscode.window.showQuickPick(docThemes, {
-        title: 'Botox Setup (3/6): Default Document Theme',
+        title: `${wizardTitlePrefix} (3/6): Default Document Theme`,
         placeHolder: 'Select your preferred default document theme',
         ignoreFocusOut: true
     });
@@ -147,7 +163,7 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
         { label: 'nord', description: 'Arctic, cool-toned nord palette with pastel accents', picked: defaultSlideTheme === 'nord' }
     ];
     const chosenSlideTheme = await vscode.window.showQuickPick(slideThemes, {
-        title: 'Botox Setup (4/6): Default Slide Theme',
+        title: `${wizardTitlePrefix} (4/6): Default Slide Theme`,
         placeHolder: 'Select your preferred presentation slide theme',
         ignoreFocusOut: true
     });
@@ -159,7 +175,7 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
         { label: 'us-letter', description: 'North American Letter (8.5 x 11 in)', picked: defaultPapersize === 'us-letter' }
     ];
     const chosenPaper = await vscode.window.showQuickPick(paperSizes, {
-        title: 'Botox Setup (5/6): Default Paper Size',
+        title: `${wizardTitlePrefix} (5/6): Default Paper Size`,
         placeHolder: 'Select default paper size for PDF documents',
         ignoreFocusOut: true
     });
@@ -171,7 +187,7 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
         { label: 'Disabled', description: 'Keep web links inline without creating a bibliography', picked: !defaultBib }
     ];
     const chosenBib = await vscode.window.showQuickPick(bibOptions, {
-        title: 'Botox Setup (6/6): Automatic Bibliography',
+        title: `${wizardTitlePrefix} (6/6): Automatic Bibliography`,
         placeHolder: 'Enable automatic IEEE-standard bibliography transformation?',
         ignoreFocusOut: true
     });
@@ -222,7 +238,7 @@ export async function runSetupWizard(context: vscode.ExtensionContext) {
         fs.writeFileSync(targetPath, yamlContent, 'utf-8');
 
         // Mark that setup has been completed
-        context.globalState.update('botox.hasPromptedSetup', true);
+        await context.globalState.update(SETUP_COMPLETED_KEY, true);
 
         const openItem = 'Open Config File';
         const action = await vscode.window.showInformationMessage(
@@ -247,29 +263,17 @@ export function runSetupInTerminal() {
     terminal.sendText(`${binary} setup`);
 }
 
-export function checkFirstRunSetup(context: vscode.ExtensionContext) {
-    const SETUP_PROMPTED_KEY = 'botox.hasPromptedSetup';
-    const hasPrompted = context.globalState.get<boolean>(SETUP_PROMPTED_KEY, false);
+export async function resetSetupState(context: vscode.ExtensionContext) {
+    await context.globalState.update(SETUP_COMPLETED_KEY, false);
+}
 
-    if (hasPrompted) {
-        return;
-    }
+export async function checkFirstRunSetup(context: vscode.ExtensionContext) {
+    const isCompleted = context.globalState.get<boolean>(SETUP_COMPLETED_KEY, false);
 
-    const globalPath = getGlobalConfigPath();
-    const configExists = fs.existsSync(globalPath);
-
-    if (!configExists) {
-        context.globalState.update(SETUP_PROMPTED_KEY, true);
-        vscode.window.showInformationMessage(
-            'Welcome to Botox! Would you like to configure your default author, themes, and typesetting preferences?',
-            'Configure Defaults',
-            'Use Defaults'
-        ).then((choice) => {
-            if (choice === 'Configure Defaults') {
-                runSetupWizard(context);
-            }
-        });
-    } else {
-        context.globalState.update(SETUP_PROMPTED_KEY, true);
+    if (!isCompleted) {
+        // Automatically launch the setup wizard so the user configures their defaults
+        setTimeout(() => {
+            runSetupWizard(context, true);
+        }, 800);
     }
 }

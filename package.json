@@ -33,16 +33,35 @@
     "vscode": "^1.85.0"
   },
   "activationEvents": [
+    "onStartupFinished",
     "onLanguage:markdown",
     "onCommand:botox.openPreview",
     "onCommand:botox.compilePdf",
     "onCommand:botox.initDocument",
     "onCommand:botox.initSlides",
     "onCommand:botox.setup",
-    "onCommand:botox.setupTerminal"
+    "onCommand:botox.setupTerminal",
+    "onCommand:botox.resetSetup"
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "botox.setup",
+        "title": "Configure Defaults (Setup Wizard)",
+        "category": "Botox",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "botox.resetSetup",
+        "title": "Reset Setup Status (Force Setup on Next Run)",
+        "category": "Botox"
+      },
+      {
+        "command": "botox.setupTerminal",
+        "title": "Run Setup in Terminal",
+        "category": "Botox",
+        "icon": "$(terminal)"
+      },
       {
         "command": "botox.openPreview",
         "title": "Open Live PDF Preview",
@@ -64,18 +83,6 @@
         "command": "botox.initSlides",
         "title": "Initialize Slide Deck",
         "category": "Botox"
-      },
-      {
-        "command": "botox.setup",
-        "title": "Configure Defaults (Setup Wizard)",
-        "category": "Botox",
-        "icon": "$(gear)"
-      },
-      {
-        "command": "botox.setupTerminal",
-        "title": "Run Setup in Terminal",
-        "category": "Botox",
-        "icon": "$(terminal)"
       },
       {
         "command": "botox.toggleSyncScroll",

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { BotoxPreviewPanel } from './preview';
 import { compileDocument, runInit, setExtensionContext } from './compiler';
-import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup } from './setup';
+import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup, resetSetupState } from './setup';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
@@ -231,6 +231,15 @@ export function activate(context: vscode.ExtensionContext) {
         () => runSetupInTerminal()
     );
 
+    // 8. Reset Setup Status (Force Setup on Next Run)
+    const resetSetupCmd = vscode.commands.registerCommand(
+        'botox.resetSetup',
+        async () => {
+            await resetSetupState(context);
+            vscode.window.showInformationMessage('Botox: Setup state has been reset. You will be prompted to set up on next start.');
+        }
+    );
+
     // Watch on save
     const onSaveDisposable = vscode.workspace.onDidSaveTextDocument((document) => {
         const config = vscode.workspace.getConfiguration('botox');
@@ -419,6 +428,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         toggleSyncScrollCmd,
         setupCmd,
         setupTerminalCmd,
+        resetSetupCmd,
         onSaveDisposable,
         onChangeDisposable,
         onSelectionChangeDisposable,
