@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -37,7 +37,9 @@
     "onCommand:botox.openPreview",
     "onCommand:botox.compilePdf",
     "onCommand:botox.initDocument",
-    "onCommand:botox.initSlides"
+    "onCommand:botox.initSlides",
+    "onCommand:botox.setup",
+    "onCommand:botox.setupTerminal"
   ],
   "contributes": {
     "commands": [
@@ -62,6 +64,18 @@
         "command": "botox.initSlides",
         "title": "Initialize Slide Deck",
         "category": "Botox"
+      },
+      {
+        "command": "botox.setup",
+        "title": "Configure Defaults (Setup Wizard)",
+        "category": "Botox",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "botox.setupTerminal",
+        "title": "Run Setup in Terminal",
+        "category": "Botox",
+        "icon": "$(terminal)"
       },
       {
         "command": "botox.toggleSyncScroll",
@@ -165,7 +179,40 @@
           "description": "Display compilation status and quick-preview toggle in the VS Code status bar."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "botox.gettingStarted",
+        "title": "Getting Started with Botox",
+        "description": "Configure your typesetting defaults and start writing publication-grade Markdown documents.",
+        "steps": [
+          {
+            "id": "botox.walkthrough.setup",
+            "title": "Configure Defaults",
+            "description": "Run the interactive wizard to set your default author name, themes, and paper size.\n[Configure Defaults](command:botox.setup)\n[Run in Terminal](command:botox.setupTerminal)",
+            "media": {
+              "markdown": "media/walkthrough-setup.md"
+            }
+          },
+          {
+            "id": "botox.walkthrough.init",
+            "title": "Create Document or Slides",
+            "description": "Scaffold a new document or slide deck with your chosen defaults prefilled.\n[Initialize Document](command:botox.initDocument)\n[Initialize Slides](command:botox.initSlides)",
+            "media": {
+              "markdown": "media/walkthrough-init.md"
+            }
+          },
+          {
+            "id": "botox.walkthrough.preview",
+            "title": "Live Preview & Typesetting",
+            "description": "Typeset and view your document in real time with synchronized scrolling.\n[Open Live Preview](command:botox.openPreview)",
+            "media": {
+              "markdown": "media/walkthrough-preview.md"
+            }
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

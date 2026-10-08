@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { BotoxPreviewPanel } from './preview';
 import { compileDocument, runInit, setExtensionContext } from './compiler';
+import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup } from './setup';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
@@ -80,6 +81,9 @@ export function activate(context: vscode.ExtensionContext) {
         botoxDiagnostics.delete(doc.uri);
     }, null, context.subscriptions);
     updateStatusBar();
+
+    // Check first-run setup interaction
+    checkFirstRunSetup(context);
     // 1. Open Preview to the Side
     const openPreviewCmd = vscode.commands.registerCommand(
         'botox.openPreview',
@@ -213,6 +217,18 @@ export function activate(context: vscode.ExtensionContext) {
                 `Botox: Follow Cursor is now ${!current ? 'Enabled' : 'Disabled'}`
             );
         }
+    );
+
+    // 6. Setup Defaults Wizard
+    const setupCmd = vscode.commands.registerCommand(
+        'botox.setup',
+        () => runSetupWizard(context)
+    );
+
+    // 7. Setup in Terminal
+    const setupTerminalCmd = vscode.commands.registerCommand(
+        'botox.setupTerminal',
+        () => runSetupInTerminal()
     );
 
     // Watch on save
@@ -401,6 +417,8 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         initDocumentCmd,
         initSlidesCmd,
         toggleSyncScrollCmd,
+        setupCmd,
+        setupTerminalCmd,
         onSaveDisposable,
         onChangeDisposable,
         onSelectionChangeDisposable,
