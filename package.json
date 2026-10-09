@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {

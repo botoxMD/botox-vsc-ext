@@ -50,18 +50,111 @@ export function reportCompilationSuccess(uri: vscode.Uri, durationMs?: number) {
 export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     updateStatusBar(undefined, true, errorMsg);
 
-    let line = 0;
-    const match = errorMsg.match(/(?:line|row)\s*(\d+)/i) || errorMsg.match(/:(\d+):(\d+)/);
-    if (match) {
-        const parsed = parseInt(match[1], 10);
-        if (!isNaN(parsed) && parsed > 0) {
-            line = parsed - 1;
+    // Find the open text document if available
+    const doc = vscode.workspace.textDocuments.find(
+        (d) => d.uri.toString() === uri.toString() || d.uri.fsPath === uri.fsPath
+    );
+
+    let foundLine: number | undefined;
+    let foundCol: number | undefined;
+
+    // 1. Try parsing explicit location (e.g. "document.md:14:5:", "line 14:5", "line 14 col 5", ":14:5")
+    const locMatch =
+        errorMsg.match(/(?:[a-zA-Z0-9_\-\.]+\.(?:md|markdown)):(\d+):(\d+)/i) ||
+        errorMsg.match(/(?:line|row)\s*(\d+)(?:\s*(?:col|column|:)\s*(\d+))?/i) ||
+        errorMsg.match(/:(\d+):(\d+)/);
+
+    if (locMatch) {
+        const parsedLine = parseInt(locMatch[1], 10);
+        if (!isNaN(parsedLine) && parsedLine > 0) {
+            foundLine = parsedLine - 1;
+        }
+        if (locMatch[2]) {
+            const parsedCol = parseInt(locMatch[2], 10);
+            if (!isNaN(parsedCol) && parsedCol > 0) {
+                foundCol = parsedCol - 1;
+            }
         }
     }
-    const range = new vscode.Range(line, 0, line, 100);
-    const diag = new vscode.Diagnostic(range, errorMsg, vscode.DiagnosticSeverity.Error);
-    diag.source = 'Botox';
-    botoxDiagnostics.set(uri, [diag]);
+
+    // 2. Try extracting specific token or snippet from the error message
+    let token: string | undefined;
+    const nearMatch = errorMsg.match(/(?:near|at)\s*'([^']+)'/i);
+    if (nearMatch) {
+        token = nearMatch[1].trim();
+    } else {
+        const fileMatch = errorMsg.match(/searched at [^)]*[\/\\]([^\/\s)]+)/i);
+        if (fileMatch) {
+            token = fileMatch[1].trim();
+        } else {
+            const varMatch = errorMsg.match(
+                /(?:unknown variable|unknown function|cannot find function|cannot find variable|cannot find|not found)[:\s]+'?([a-zA-Z0-9_\-\.]+)'?/i
+            );
+            if (varMatch) {
+                token = varMatch[1].trim();
+            }
+        }
+    }
+
+    // 3. Determine diagnostic range
+    let range: vscode.Range | undefined;
+
+    if (doc) {
+        const lineCount = doc.lineCount;
+
+        // If we have a target token but no line number, search the document for the token
+        if (foundLine === undefined && token && token.length > 0) {
+            for (let l = 0; l < lineCount; l++) {
+                const text = doc.lineAt(l).text;
+                const idx = text.indexOf(token);
+                if (idx !== -1) {
+                    foundLine = l;
+                    foundCol = idx;
+                    break;
+                }
+            }
+        }
+
+        if (foundLine !== undefined && foundLine >= 0 && foundLine < lineCount) {
+            const lineText = doc.lineAt(foundLine).text;
+
+            if (token && token.length > 0 && lineText.includes(token)) {
+                // Exact token match on the line
+                const startIdx = lineText.indexOf(token);
+                range = new vscode.Range(foundLine, startIdx, foundLine, startIdx + token.length);
+            } else if (foundCol !== undefined && foundCol < lineText.length) {
+                // Word at column
+                const wordRange = doc.getWordRangeAtPosition(new vscode.Position(foundLine, foundCol));
+                if (wordRange) {
+                    range = wordRange;
+                } else {
+                    const start = foundCol;
+                    const end = Math.min(lineText.length, start + 1);
+                    range = new vscode.Range(foundLine, start, foundLine, end);
+                }
+            } else {
+                // Non-empty part of the line
+                const firstNonWs = doc.lineAt(foundLine).firstNonWhitespaceCharacterIndex ?? 0;
+                const end = Math.max(firstNonWs + 1, lineText.trimEnd().length);
+                range = new vscode.Range(foundLine, firstNonWs, foundLine, end);
+            }
+        }
+    } else if (foundLine !== undefined) {
+        const col = foundCol ?? 0;
+        const len = token ? token.length : 10;
+        range = new vscode.Range(foundLine, col, foundLine, col + len);
+    }
+
+    // 4. CRITICAL: Only set diagnostic if a valid error location was found.
+    // NEVER fall back to redlining line 0 / the first word of the file!
+    if (range) {
+        const diag = new vscode.Diagnostic(range, errorMsg, vscode.DiagnosticSeverity.Error);
+        diag.source = 'Botox';
+        botoxDiagnostics.set(uri, [diag]);
+    } else {
+        // Clear any stale diagnostics so line 0 / first word is NEVER redlined
+        botoxDiagnostics.delete(uri);
+    }
 }
 
 export function activate(context: vscode.ExtensionContext) {
