@@ -102,15 +102,43 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     if (doc) {
         const lineCount = doc.lineCount;
 
-        // If we have a target token but no line number, search the document for the token
-        if (foundLine === undefined && token && token.length > 0) {
-            for (let l = 0; l < lineCount; l++) {
-                const text = doc.lineAt(l).text;
-                const idx = text.indexOf(token);
-                if (idx !== -1) {
-                    foundLine = l;
-                    foundCol = idx;
-                    break;
+        // If line is out of document bounds (e.g. Typst generated preamble offset ~146 lines):
+        if (foundLine !== undefined && foundLine >= lineCount) {
+            const preambleCorrected = foundLine - 146;
+            if (preambleCorrected >= 0 && preambleCorrected < lineCount) {
+                foundLine = preambleCorrected;
+            } else {
+                foundLine = lineCount - 1;
+            }
+        }
+
+        // If we have a target token, search near foundLine or throughout the document
+        if (token && token.length > 0) {
+            let tokenFound = false;
+            if (foundLine !== undefined) {
+                const searchStart = Math.max(0, foundLine - 10);
+                const searchEnd = Math.min(lineCount - 1, foundLine + 10);
+                for (let l = searchStart; l <= searchEnd; l++) {
+                    const text = doc.lineAt(l).text;
+                    const idx = text.indexOf(token);
+                    if (idx !== -1) {
+                        foundLine = l;
+                        foundCol = idx;
+                        tokenFound = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!tokenFound && (foundLine === undefined || foundLine >= lineCount)) {
+                for (let l = 0; l < lineCount; l++) {
+                    const text = doc.lineAt(l).text;
+                    const idx = text.indexOf(token);
+                    if (idx !== -1) {
+                        foundLine = l;
+                        foundCol = idx;
+                        break;
+                    }
                 }
             }
         }
