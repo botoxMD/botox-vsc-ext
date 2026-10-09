@@ -90,9 +90,6 @@ export class BotoxPreviewPanel {
                         config.update('syncScroll', !current, vscode.ConfigurationTarget.Global);
                         return;
                     }
-                    case 'jumpToSource':
-                        this.handleJumpToSource(message.pageIndex, message.yRatio, message.selectedText);
-                        return;
                 }
             },
             null,
@@ -100,118 +97,6 @@ export class BotoxPreviewPanel {
         );
 
         this.update();
-    }
-
-    private async handleJumpToSource(pageIndex: number, yRatio: number, selectedText?: string) {
-        const config = vscode.workspace.getConfiguration('botox');
-        if (!config.get<boolean>('reverseSync', true)) {
-            return;
-        }
-
-        try {
-            const doc = await vscode.workspace.openTextDocument(this._documentUri);
-            let editor = vscode.window.visibleTextEditors.find(
-                e => e.document.uri.toString() === this._documentUri.toString() ||
-                     e.document.uri.fsPath === this._documentUri.fsPath
-            );
-
-            if (!editor) {
-                editor = await vscode.window.showTextDocument(doc, {
-                    viewColumn: vscode.ViewColumn.One,
-                    preserveFocus: false
-                });
-            } else {
-                editor = await vscode.window.showTextDocument(editor.document, {
-                    viewColumn: editor.viewColumn,
-                    preserveFocus: false
-                });
-            }
-
-            if (doc.lineCount === 0) return;
-
-            const totalPages = Math.max(1, this._lastNumPages || 1);
-            const expectedLine = Math.min(
-                Math.max(0, Math.floor(((pageIndex + yRatio) / totalPages) * doc.lineCount)),
-                doc.lineCount - 1
-            );
-
-            let targetLine = -1;
-
-            if (selectedText && selectedText.length >= 2) {
-                const words = selectedText
-                    .toLowerCase()
-                    .replace(/[^a-z0-9 ]/gi, ' ')
-                    .split(/\s+/)
-                    .filter(w => w.length >= 2);
-
-                if (words.length > 0) {
-                    const exact = selectedText.trim().toLowerCase();
-                    let bestExactDist = Infinity;
-                    for (let i = 0; i < doc.lineCount; i++) {
-                        if (doc.lineAt(i).text.toLowerCase().includes(exact)) {
-                            const dist = Math.abs(i - expectedLine);
-                            if (dist < bestExactDist) {
-                                bestExactDist = dist;
-                                targetLine = i;
-                            }
-                        }
-                    }
-
-                    if (targetLine < 0) {
-                        let bestScore = -Infinity;
-                        for (let i = 0; i < doc.lineCount; i++) {
-                            const lineLower = doc.lineAt(i).text.toLowerCase();
-                            let matchCount = 0;
-                            for (const w of words) {
-                                if (lineLower.includes(w)) matchCount++;
-                            }
-                            if (matchCount >= Math.min(words.length, 2)) {
-                                const dist = Math.abs(i - expectedLine);
-                                const score = matchCount * 100 - dist;
-                                if (score > bestScore) {
-                                    bestScore = score;
-                                    targetLine = i;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (targetLine < 0 && this._lastHeadings && this._lastHeadings.length > 0) {
-                let bestH: VectorHeadingInfo | null = null;
-                for (const h of this._lastHeadings) {
-                    if (h.page_index < pageIndex || (h.page_index === pageIndex && h.y_ratio <= yRatio + 0.05)) {
-                        bestH = h;
-                    }
-                }
-                if (bestH && bestH.text) {
-                    const cleanH = bestH.text.toLowerCase().replace(/[^a-z0-9]/gi, '').trim();
-                    let bestDist = Infinity;
-                    for (let i = 0; i < doc.lineCount; i++) {
-                        const lineClean = doc.lineAt(i).text.toLowerCase().replace(/[^a-z0-9]/gi, '').trim();
-                        if (cleanH.length >= 2 && (lineClean.includes(cleanH) || cleanH.includes(lineClean))) {
-                            const dist = Math.abs(i - expectedLine);
-                            if (dist < bestDist) {
-                                bestDist = dist;
-                                targetLine = i;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (targetLine < 0) {
-                targetLine = expectedLine;
-            }
-
-            targetLine = Math.min(Math.max(0, targetLine), doc.lineCount - 1);
-            const targetRange = doc.lineAt(targetLine).range;
-            editor.selection = new vscode.Selection(targetRange.start, targetRange.start);
-            editor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
-        } catch (e) {
-            console.error('Botox jumpToSource error:', e);
-        }
     }
 
     public scrollToLine(
@@ -1624,35 +1509,6 @@ export class BotoxPreviewPanel {
         svgEl.style.pointerEvents = 'auto';
       }
     }
-
-    container.addEventListener('dblclick', (e) => {
-      let el = e.target;
-      let pageBox = null;
-      while (el && el !== container) {
-        if (el.classList && el.classList.contains('page-box')) {
-          pageBox = el;
-          break;
-        }
-        el = el.parentElement || el.parentNode;
-      }
-      if (!pageBox) return;
-
-      const pageId = pageBox.id || '';
-      const pageIndex = parseInt(pageId.replace('page-', ''), 10) - 1;
-      if (isNaN(pageIndex) || pageIndex < 0) return;
-
-      const sel = window.getSelection() ? window.getSelection().toString().trim() : '';
-      const rect = pageBox.getBoundingClientRect();
-      const clickY = e.clientY - rect.top;
-      const yRatio = rect.height > 0 ? Math.max(0, Math.min(1, clickY / rect.height)) : 0;
-
-      vscode.postMessage({
-        command: 'jumpToSource',
-        pageIndex: pageIndex,
-        yRatio: yRatio,
-        selectedText: sel
-      });
-    });
 
     function getNextVisibleIndex(idx) {
       const pages = container.querySelectorAll('.page-box');

@@ -175,11 +175,6 @@
           "default": true,
           "description": "Automatically synchronize preview scroll and position to follow the editor cursor."
         },
-        "botox.reverseSync": {
-          "type": "boolean",
-          "default": true,
-          "description": "Double-click anywhere in the preview to jump directly to that position in the Markdown editor."
-        },
         "botox.showStatusBarItem": {
           "type": "boolean",
           "default": true,
