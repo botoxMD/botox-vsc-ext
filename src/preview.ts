@@ -1167,8 +1167,28 @@ export class BotoxPreviewPanel {
       currentErrorMessage = msg || '';
       btnErrorBadge.style.display = 'inline-flex';
 
-      const firstLine = (msg || '').split(String.fromCharCode(10))[0] || 'Compilation error';
-      errorHudText.textContent = firstLine;
+      let category = 'Typst Error';
+      let sub = 'Typst encountered an issue compiling your Markdown';
+      let tip = 'Check for unclosed delimiters (*, _, [, ]), unescaped $, or frontmatter YAML formatting.';
+
+      if ((msg || '').includes('[LaTeX Error]') || (msg || '').includes('LaTeX Error')) {
+        category = 'LaTeX Error';
+        sub = 'Mathematical formula or LaTeX syntax issue detected';
+        tip = 'Check your LaTeX math syntax, unclosed braces ({, }), missing fractions, or math symbols.';
+      } else if ((msg || '').includes('[Resource Error]') || (msg || '').includes('Resource Error') || (msg || '').toLowerCase().includes('file not found')) {
+        category = 'Resource Error';
+        sub = 'Image or referenced file could not be found';
+        tip = 'Verify the image or file path is relative to the Markdown file or workspace.';
+      }
+
+      let cleanMsg = (msg || '')
+        .replace(/^Compilation failed:\s*/i, '')
+        .replace(/^\[(?:LaTeX|Typst|Resource) Error\]\s*/i, '')
+        .replace(/^(?:LaTeX|Typst|Resource) Error:\s*/i, '')
+        .trim();
+
+      const firstLine = cleanMsg.split(String.fromCharCode(10))[0] || 'Compilation error';
+      errorHudText.textContent = category + ': ' + firstLine;
       errorHudPre.textContent = msg;
 
       if (renderedPageSvgs.length === 0) {
@@ -1182,8 +1202,8 @@ export class BotoxPreviewPanel {
                   '<svg width="24" height="24" viewBox="0 0 16 16" fill="#ef4444"><path fill-rule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25 3a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0V8z"/></svg>' +
                 '</div>' +
                 '<div>' +
-                  '<div class="full-error-title">Typesetting Failed</div>' +
-                  '<div class="full-error-sub">Typst encountered an issue compiling your Markdown</div>' +
+                  '<div class="full-error-title">' + escapeHtml(category) + '</div>' +
+                  '<div class="full-error-sub">' + escapeHtml(sub) + '</div>' +
                 '</div>' +
               '</div>' +
               '<div class="full-error-code">' + escapeHtml(msg) + '</div>' +
@@ -1192,7 +1212,7 @@ export class BotoxPreviewPanel {
                 '<button id="btn-full-retry">Retry Compilation</button>' +
               '</div>' +
               '<div class="full-error-hint">' +
-                '<strong>Tip:</strong> Check for unclosed delimiters (*, _, [, ]), unescaped $, or frontmatter YAML formatting.' +
+                '<strong>Tip:</strong> ' + tip +
               '</div>' +
             '</div>' +
           '</div>';

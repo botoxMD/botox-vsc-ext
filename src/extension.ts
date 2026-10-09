@@ -9,7 +9,7 @@ let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
 let statusBarItem: vscode.StatusBarItem;
 
-export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg?: string) {
+export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg?: string, errorCategory?: string) {
     if (!statusBarItem) return;
     const config = vscode.workspace.getConfiguration('botox');
     if (!config.get<boolean>('showStatusBarItem', true)) {
@@ -27,7 +27,7 @@ export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg
     }
 
     if (isError) {
-        statusBarItem.text = '$(error) Botox Error';
+        statusBarItem.text = `$(error) ${errorCategory || 'Botox Error'}`;
         statusBarItem.tooltip = errorMsg || 'Botox compilation error';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     } else if (durationMs !== undefined) {
@@ -50,7 +50,6 @@ export function reportCompilationSuccess(uri: vscode.Uri, durationMs?: number) {
 export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     const expectedName = path.basename(uri.fsPath);
     const displayError = errorMsg.replace(/\bdocument\.md(?=:|\b)/g, expectedName);
-    updateStatusBar(undefined, true, displayError);
 
     // Find the open text document if available
     const doc = vscode.workspace.textDocuments.find(
@@ -62,9 +61,9 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
 
     // 1. Try parsing explicit location (e.g. "document.md:14:5:", "line 14:5", "line 14 col 5", ":14:5")
     const locMatch =
-        errorMsg.match(/(?:[a-zA-Z0-9_\-\.]+\.(?:md|markdown)):(\d+):(\d+)/i) ||
-        errorMsg.match(/(?:line|row)\s*(\d+)(?:\s*(?:col|column|:)\s*(\d+))?/i) ||
-        errorMsg.match(/:(\d+):(\d+)/);
+        displayError.match(/(?:[a-zA-Z0-9_\-\.]+\.(?:md|markdown)):(\d+):(\d+)/i) ||
+        displayError.match(/(?:line|row)\s*(\d+)(?:\s*(?:col|column|:)\s*(\d+))?/i) ||
+        displayError.match(/:(\d+):(\d+)/);
 
     if (locMatch) {
         const parsedLine = parseInt(locMatch[1], 10);
@@ -81,15 +80,15 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
 
     // 2. Try extracting specific token or snippet from the error message
     let token: string | undefined;
-    const nearMatch = errorMsg.match(/(?:near|at)\s*'([^']+)'/i);
+    const nearMatch = displayError.match(/(?:near|at)\s*'([^']+)'/i);
     if (nearMatch) {
         token = nearMatch[1].trim();
     } else {
-        const fileMatch = errorMsg.match(/searched at [^)]*[\/\\]([^\/\s)]+)/i);
+        const fileMatch = displayError.match(/searched at [^)]*[\/\\]([^\/\s)]+)/i);
         if (fileMatch) {
             token = fileMatch[1].trim();
         } else {
-            const varMatch = errorMsg.match(
+            const varMatch = displayError.match(
                 /(?:unknown variable|unknown function|cannot find function|cannot find variable|cannot find|not found)[:\s]+'?([a-zA-Z0-9_\-\.]+)'?/i
             );
             if (varMatch) {
@@ -98,7 +97,56 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
         }
     }
 
-    // 3. Determine diagnostic range
+    // 3. Determine category: "LaTeX Error", "Resource Error", or "Typst Error"
+    let category = 'Typst Error';
+    if (displayError.includes('[LaTeX Error]') || displayError.includes('LaTeX Error')) {
+        category = 'LaTeX Error';
+    } else if (displayError.includes('[Resource Error]') || displayError.includes('Resource Error') || displayError.toLowerCase().includes('file not found')) {
+        category = 'Resource Error';
+    } else if (doc && foundLine !== undefined && foundLine >= 0 && foundLine < doc.lineCount) {
+        const curLine = doc.lineAt(foundLine).text;
+        if (curLine.includes('$') || curLine.includes('\\') || curLine.includes('rac(')) {
+            category = 'LaTeX Error';
+        } else {
+            let inMath = false;
+            for (let l = 0; l <= foundLine; l++) {
+                const trimmed = doc.lineAt(l).text.trim();
+                if (trimmed.startsWith('$$') || trimmed.endsWith('$$')) {
+                    inMath = !inMath || trimmed === '$$';
+                }
+            }
+            if (inMath) {
+                category = 'LaTeX Error';
+            }
+        }
+    }
+
+    // 4. Format clean title and details
+    let cleaned = displayError
+        .replace(/^Compilation failed:\s*/i, '')
+        .replace(/^\[(?:LaTeX|Typst|Resource) Error\]\s*/i, '')
+        .replace(/^(?:LaTeX|Typst|Resource) Error:\s*/i, '')
+        .trim();
+
+    let pureMessage = cleaned.replace(/^(?:[a-zA-Z0-9_\-\.]+\.(?:md|markdown)):\d+:\d+:\s*/i, '').trim();
+
+    let mainMsg = pureMessage;
+    let hint: string | undefined;
+    const hintIdx = pureMessage.indexOf('(hint:');
+    if (hintIdx !== -1) {
+        mainMsg = pureMessage.substring(0, hintIdx).trim();
+        hint = pureMessage.substring(hintIdx).trim();
+    }
+
+    const title = `${category}: ${mainMsg}`;
+    let details = `Location: ${expectedName}${foundLine !== undefined ? `:${foundLine + 1}` : ''}${foundCol !== undefined ? `:${foundCol + 1}` : ''}`;
+    if (hint) {
+        details += `\n${hint}`;
+    }
+
+    updateStatusBar(undefined, true, `${title}\n\n${details}`, category);
+
+    // 5. Determine diagnostic range
     let range: vscode.Range | undefined;
 
     if (doc) {
@@ -175,10 +223,11 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
         range = new vscode.Range(foundLine, col, foundLine, col + len);
     }
 
-    // 4. CRITICAL: Only set diagnostic if a valid error location was found.
-    // NEVER fall back to redlining line 0 / the first word of the file!
+    // 6. Set diagnostic with category title and structured details
     if (range) {
-        const diag = new vscode.Diagnostic(range, displayError, vscode.DiagnosticSeverity.Error);
+        const diagMsg = `${title}\n\nDetails:\n${details}\n\n${cleaned}`;
+        const diag = new vscode.Diagnostic(range, diagMsg, vscode.DiagnosticSeverity.Error);
+        diag.code = category;
         diag.source = 'Botox';
         botoxDiagnostics.set(uri, [diag]);
     } else {
