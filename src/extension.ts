@@ -124,31 +124,33 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            vscode.window.withProgress(
+            const extraArgs = theme ? ['--theme', theme] : [];
+            const result = await vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
                     title: 'Compiling with Botox...',
                     cancellable: false
                 },
                 async () => {
-                    const extraArgs = theme ? ['--theme', theme] : [];
-                    const result = await compileDocument(inputPath, saveUri.fsPath, extraArgs);
-                    if (result.success) {
-                        reportCompilationSuccess(documentUri, result.durationMs);
-                        const openItem = 'Open PDF';
-                        const action = await vscode.window.showInformationMessage(
-                            `Botox: Compiled '${path.basename(saveUri.fsPath)}' in ${result.durationMs}ms`,
-                            openItem
-                        );
-                        if (action === openItem) {
-                            vscode.env.openExternal(saveUri);
-                        }
-                    } else {
-                        reportCompilationFailure(documentUri, result.error || 'Compilation failed');
-                        vscode.window.showErrorMessage(`Botox compilation failed: ${result.error}`);
-                    }
+                    return await compileDocument(inputPath, saveUri.fsPath, extraArgs);
                 }
             );
+
+            if (result.success) {
+                reportCompilationSuccess(documentUri, result.durationMs);
+                const openItem = 'Open PDF';
+                vscode.window.showInformationMessage(
+                    `Botox: Compiled '${path.basename(saveUri.fsPath)}' in ${result.durationMs}ms`,
+                    openItem
+                ).then(action => {
+                    if (action === openItem) {
+                        vscode.env.openExternal(saveUri);
+                    }
+                });
+            } else {
+                reportCompilationFailure(documentUri, result.error || 'Compilation failed');
+                vscode.window.showErrorMessage(`Botox compilation failed: ${result.error}`);
+            }
         }
     );
 
