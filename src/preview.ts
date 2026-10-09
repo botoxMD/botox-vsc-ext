@@ -56,6 +56,26 @@ export class BotoxPreviewPanel {
         return previewPanel;
     }
 
+    public static revive(panel: vscode.WebviewPanel, documentUri: vscode.Uri): BotoxPreviewPanel {
+        const key = documentUri.toString();
+        const existing = BotoxPreviewPanel.get(documentUri);
+        if (existing) {
+            existing._panel.dispose();
+        }
+
+        panel.title = `Preview: ${path.basename(documentUri.fsPath)}`;
+        panel.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [
+                vscode.Uri.file(path.dirname(documentUri.fsPath))
+            ]
+        };
+
+        const previewPanel = new BotoxPreviewPanel(panel, documentUri);
+        BotoxPreviewPanel.currentPanels.set(key, previewPanel);
+        return previewPanel;
+    }
+
     private constructor(panel: vscode.WebviewPanel, documentUri: vscode.Uri) {
         this._panel = panel;
         this._documentUri = documentUri;
@@ -973,6 +993,7 @@ export class BotoxPreviewPanel {
 
   <script>
     const vscode = acquireVsCodeApi();
+    vscode.setState({ documentUri: '${this._documentUri.toString()}' });
     const container = document.getElementById('viewer-container');
     const zoomLabel = document.getElementById('zoom-level');
     const pageInput = document.getElementById('page-input');
@@ -1909,3 +1930,26 @@ export class BotoxPreviewPanel {
 </html>`;
     }
 }
+
+export class BotoxPreviewSerializer implements vscode.WebviewPanelSerializer {
+    async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel, state: any): Promise<void> {
+        let uriString = state?.documentUri;
+        if (!uriString) {
+            const active = vscode.window.activeTextEditor;
+            if (active && (active.document.languageId === 'markdown' || active.document.fileName.endsWith('.md'))) {
+                uriString = active.document.uri.toString();
+            }
+        }
+        if (uriString) {
+            try {
+                const uri = vscode.Uri.parse(uriString);
+                BotoxPreviewPanel.revive(webviewPanel, uri);
+                return;
+            } catch (e) {
+                console.error('Failed to revive Botox preview:', e);
+            }
+        }
+        webviewPanel.dispose();
+    }
+}
+

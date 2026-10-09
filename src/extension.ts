@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { BotoxPreviewPanel } from './preview';
+import * as fs from 'fs';
+import { BotoxPreviewPanel, BotoxPreviewSerializer } from './preview';
 import { compileDocument, runInit, setExtensionContext } from './compiler';
 import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup, resetSetupState } from './setup';
 
@@ -84,6 +85,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Check first-run setup interaction
     checkFirstRunSetup(context);
+
+    // Register Webview serializer to restore preview panels across reloads and sessions
+    context.subscriptions.push(
+        vscode.window.registerWebviewPanelSerializer('botoxPreview', new BotoxPreviewSerializer())
+    );
+
     // 1. Open Preview to the Side
     const openPreviewCmd = vscode.commands.registerCommand(
         'botox.openPreview',
@@ -112,12 +119,24 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const inputPath = documentUri.fsPath;
-            const defaultOutputPath = inputPath.replace(/\.(md|markdown)$/i, '.pdf');
+            let fileContent = '';
+            try {
+                const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
+                fileContent = doc ? doc.getText() : fs.readFileSync(inputPath, 'utf8');
+            } catch {}
+
+            const isSlides = /^(marp|slides|presentation):\s*true/im.test(fileContent) ||
+                /(slides|deck|presentation)\.md$/i.test(inputPath);
+
+            const defaultExt = isSlides ? 'html' : 'pdf';
+            const defaultOutputPath = inputPath.replace(/\.(md|markdown)$/i, `.${defaultExt}`);
 
             const saveUri = await vscode.window.showSaveDialog({
                 defaultUri: vscode.Uri.file(defaultOutputPath),
-                filters: { 'PDF Document': ['pdf'] },
-                title: 'Export PDF with Botox'
+                filters: isSlides
+                    ? { 'HTML Presentation Slides': ['html', 'htm'], 'PDF Document': ['pdf'] }
+                    : { 'PDF Document': ['pdf'], 'HTML Document': ['html', 'htm'] },
+                title: isSlides ? 'Export Presentation Slides with Botox' : 'Export PDF with Botox'
             });
 
             if (!saveUri) {
@@ -138,7 +157,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (result.success) {
                 reportCompilationSuccess(documentUri, result.durationMs);
-                const openItem = 'Open PDF';
+                const isHtml = saveUri.fsPath.endsWith('.html') || saveUri.fsPath.endsWith('.htm');
+                const openItem = isHtml ? 'Open HTML Slides' : 'Open PDF';
                 vscode.window.showInformationMessage(
                     `Botox: Compiled '${path.basename(saveUri.fsPath)}' in ${result.durationMs}ms`,
                     openItem
