@@ -48,7 +48,9 @@ export function reportCompilationSuccess(uri: vscode.Uri, durationMs?: number) {
 }
 
 export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
-    updateStatusBar(undefined, true, errorMsg);
+    const expectedName = path.basename(uri.fsPath);
+    const displayError = errorMsg.replace(/\bdocument\.md(?=:|\b)/g, expectedName);
+    updateStatusBar(undefined, true, displayError);
 
     // Find the open text document if available
     const doc = vscode.workspace.textDocuments.find(
@@ -176,7 +178,7 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     // 4. CRITICAL: Only set diagnostic if a valid error location was found.
     // NEVER fall back to redlining line 0 / the first word of the file!
     if (range) {
-        const diag = new vscode.Diagnostic(range, errorMsg, vscode.DiagnosticSeverity.Error);
+        const diag = new vscode.Diagnostic(range, displayError, vscode.DiagnosticSeverity.Error);
         diag.source = 'Botox';
         botoxDiagnostics.set(uri, [diag]);
     } else {

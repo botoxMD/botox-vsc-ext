@@ -36,11 +36,14 @@ export function setExtensionContext(context: vscode.ExtensionContext) {
     extensionContext = context;
 }
 
-export function cleanCompilerError(raw: string): string {
+export function cleanCompilerError(raw: string, fallbackFileName?: string): string {
     let clean = (raw || '').trim();
     clean = clean.replace(/^Error compiling Typst to vector preview:\s*/i, '');
     clean = clean.replace(/^Error compiling to PDF:\s*/i, '');
     clean = clean.replace(/^Error:\s*/i, '');
+    if (fallbackFileName) {
+        clean = clean.replace(/\bdocument\.md(?=:|\b)/g, fallbackFileName);
+    }
     return clean.trim();
 }
 
@@ -259,7 +262,7 @@ export async function compileForPreview(
     const useStdin = typeof liveContent === 'string';
 
     const args = useStdin
-        ? ['-', '-o', targetOutput, '--resource-dir', inputDir]
+        ? ['-', '-o', targetOutput, '--resource-dir', inputDir, '--source-file', inputPath]
         : [inputPath, '-o', targetOutput];
 
     if (theme) {
@@ -312,7 +315,7 @@ export async function compileForPreview(
             if (code !== 0) {
                 resolve({
                     success: false,
-                    error: cleanCompilerError(stderr || stdout || `Process exited with code ${code}`),
+                    error: cleanCompilerError(stderr || stdout || `Process exited with code ${code}`, path.basename(inputPath)),
                     durationMs
                 });
                 return;
@@ -395,7 +398,7 @@ export async function compileDocument(
                     const message = stderr || stdout || error.message;
                     resolve({
                         success: false,
-                        error: cleanCompilerError(message),
+                        error: cleanCompilerError(message, path.basename(inputPath)),
                         durationMs
                     });
                     return;
