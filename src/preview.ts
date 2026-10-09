@@ -671,37 +671,27 @@ export class BotoxPreviewPanel {
     .segmented-control .zoom-label:hover {
       background: var(--btn-hover);
     }
-    .sync-pill {
-      background: var(--btn-bg);
-      color: var(--btn-fg);
-      border: 1px solid var(--toolbar-border);
-      border-radius: 12px;
-      padding: 3px 9px;
-      font-size: 11px;
-      cursor: pointer;
+    .follow-cursor-label {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      transition: all 0.15s ease;
-      font-family: inherit;
-    }
-    .sync-pill:hover {
-      background: var(--btn-hover);
-    }
-    .sync-pill .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #64748b;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--btn-fg);
+      cursor: pointer;
+      user-select: none;
+      padding: 3px 6px;
+      border-radius: 4px;
       transition: background 0.15s ease;
     }
-    .sync-pill.active {
-      border-color: #38bdf8;
-      color: #38bdf8;
+    .follow-cursor-label:hover {
+      background: var(--btn-hover);
     }
-    .sync-pill.active .dot {
-      background: #38bdf8;
-      box-shadow: 0 0 6px #38bdf8;
+    .follow-cursor-label input[type="checkbox"] {
+      cursor: pointer;
+      margin: 0;
+      width: 13px;
+      height: 13px;
+      accent-color: var(--vscode-focusBorder, #38bdf8);
     }
     .page-nav-pill {
       display: inline-flex;
@@ -743,15 +733,6 @@ export class BotoxPreviewPanel {
       font-size: 11px;
       padding-right: 4px;
       opacity: 0.85;
-    }
-    .timing-badge {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--fg);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-family: monospace;
-      opacity: 0.75;
     }
 
     /* Full-screen Error Card when no pages rendered */
@@ -1056,10 +1037,10 @@ export class BotoxPreviewPanel {
         <button id="btn-zoom-in" title="Zoom In (Ctrl +)">+</button>
         <button id="btn-zoom-fit" title="Fit to Available Width">Fit</button>
       </div>
-      <button id="btn-sync" class="sync-pill ${initialSync ? 'active' : ''}" title="Follow active cursor and editor scroll (click to toggle)">
-        <span class="dot"></span>
-        <span>Sync</span>
-      </button>
+      <label id="follow-cursor-label" class="follow-cursor-label" title="Follow active cursor and editor scroll">
+        <input type="checkbox" id="chk-follow-cursor" ${initialSync ? 'checked' : ''} />
+        <span>Follow cursor</span>
+      </label>
     </div>
     <div class="tool-group">
       <button id="btn-error-badge" class="tool-btn" style="display: none; color: #fca5a5; background: #7f1d1d; border-color: #ef4444;" title="Toggle Error Details">
@@ -1079,7 +1060,6 @@ export class BotoxPreviewPanel {
       <button id="btn-export" class="icon-btn" title="Export PDF with Botox">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
       </button>
-      <span id="timing" class="timing-badge">${timingStr}</span>
     </div>
   </div>
 
@@ -1116,7 +1096,6 @@ export class BotoxPreviewPanel {
     const btnNextPage = document.getElementById('btn-next-page');
     const btnToggleSlides = document.getElementById('btn-toggle-slides');
     const btnPresentMode = document.getElementById('btn-present-mode');
-    const timingBadge = document.getElementById('timing');
     const btnErrorBadge = document.getElementById('btn-error-badge');
     const errorHud = document.getElementById('error-hud');
     const errorHudHeader = document.getElementById('error-hud-header');
@@ -1127,7 +1106,8 @@ export class BotoxPreviewPanel {
     const btnHudCopy2 = document.getElementById('btn-hud-copy2');
     const btnHudClose = document.getElementById('btn-hud-close');
     const btnFit = document.getElementById('btn-zoom-fit');
-    const btnSync = document.getElementById('btn-sync');
+    const chkFollowCursor = document.getElementById('chk-follow-cursor');
+    const followCursorLabel = document.getElementById('follow-cursor-label');
     const themeSelect = document.getElementById('theme-select');
 
     const slideThemes = [
@@ -1196,20 +1176,23 @@ export class BotoxPreviewPanel {
     const basePageWidth = 820;
 
     function updateSyncButtonUI() {
-      if (syncScrollEnabled) {
-        btnSync.classList.add('active');
-        btnSync.title = 'Cursor and scroll synchronization is active (click to disable)';
-      } else {
-        btnSync.classList.remove('active');
-        btnSync.title = 'Cursor and scroll synchronization is disabled (click to enable)';
+      if (chkFollowCursor) {
+        chkFollowCursor.checked = syncScrollEnabled;
+      }
+      if (followCursorLabel) {
+        followCursorLabel.title = syncScrollEnabled
+          ? 'Follow cursor is active (click to disable)'
+          : 'Follow cursor is disabled (click to enable)';
       }
     }
 
-    btnSync.addEventListener('click', () => {
-      syncScrollEnabled = !syncScrollEnabled;
-      updateSyncButtonUI();
-      vscode.postMessage({ command: 'toggleSyncScroll' });
-    });
+    if (chkFollowCursor) {
+      chkFollowCursor.addEventListener('change', () => {
+        syncScrollEnabled = chkFollowCursor.checked;
+        updateSyncButtonUI();
+        vscode.postMessage({ command: 'toggleSyncScroll' });
+      });
+    }
 
     function copyToClipboard(text, btnElement) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1748,9 +1731,6 @@ export class BotoxPreviewPanel {
 
     function renderPages(pages, headings, durationMs) {
       hideError();
-      if (durationMs) {
-        timingBadge.textContent = durationMs + 'ms';
-      }
       if (headings) {
         documentHeadings = headings;
       }
