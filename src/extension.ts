@@ -99,23 +99,39 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
 
     // 3. Determine category: "LaTeX Error", "Resource Error", or "Typst Error"
     let category = 'Typst Error';
-    if (displayError.includes('[LaTeX Error]') || displayError.includes('LaTeX Error')) {
+    if (displayError.includes('[LaTeX Error]') || displayError.includes('LaTeX Error:')) {
         category = 'LaTeX Error';
-    } else if (displayError.includes('[Resource Error]') || displayError.includes('Resource Error') || displayError.toLowerCase().includes('file not found')) {
+    } else if (displayError.includes('[Resource Error]') || displayError.includes('Resource Error:') || displayError.toLowerCase().includes('file not found')) {
         category = 'Resource Error';
+    } else if (displayError.includes('[Typst Error]') || displayError.includes('Typst Error:')) {
+        category = 'Typst Error';
     } else if (doc && foundLine !== undefined && foundLine >= 0 && foundLine < doc.lineCount) {
         const curLine = doc.lineAt(foundLine).text;
-        if (curLine.includes('$') || curLine.includes('\\') || curLine.includes('rac(')) {
-            category = 'LaTeX Error';
+        const trimmed = curLine.trimStart();
+        if (trimmed.startsWith(':::')) {
+            category = 'Typst Error';
         } else {
             let inMath = false;
             for (let l = 0; l <= foundLine; l++) {
-                const trimmed = doc.lineAt(l).text.trim();
-                if (trimmed.startsWith('$$') || trimmed.endsWith('$$')) {
-                    inMath = !inMath || trimmed === '$$';
+                const lineText = doc.lineAt(l).text.trim();
+                if (lineText === '$$') {
+                    inMath = !inMath;
+                } else if (lineText.startsWith('$$') && !lineText.endsWith('$$')) {
+                    inMath = true;
+                } else if (!lineText.startsWith('$$') && lineText.endsWith('$$')) {
+                    inMath = false;
                 }
             }
-            if (inMath) {
+            const hasInlineMath = curLine.includes('$') && !curLine.includes('\\$');
+            const hasLatexCmd =
+                curLine.includes('\\frac') ||
+                curLine.includes('\\sqrt') ||
+                curLine.includes('\\sum') ||
+                curLine.includes('\\int') ||
+                curLine.includes('\\mathbf') ||
+                curLine.includes('\\alpha') ||
+                curLine.includes('\\beta');
+            if (inMath || hasInlineMath || hasLatexCmd) {
                 category = 'LaTeX Error';
             }
         }
