@@ -901,24 +901,8 @@ export class BotoxPreviewPanel {
     body[data-theme="oled"] .page-box svg image {
       filter: invert(1) hue-rotate(180deg);
     }
-    #viewer-container:not(.slide-mode) .page-box.pause-step {
+    .page-box.pause-step {
       display: none !important;
-    }
-    #viewer-container.slide-mode {
-      padding: 0;
-      gap: 0;
-      overflow: hidden;
-      justify-content: center;
-      align-items: center;
-    }
-    #viewer-container.slide-mode .page-box {
-      display: none !important;
-      width: calc(100vw - 48px) !important;
-      max-height: calc(100vh - 80px);
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
-    }
-    #viewer-container.slide-mode .page-box.active-slide {
-      display: block !important;
     }
   </style>
 </head>
@@ -929,10 +913,6 @@ export class BotoxPreviewPanel {
       <button id="btn-toggle-slides" class="tool-btn ${isSlides ? 'active' : ''}" title="Toggle Slides Deck (sets marp: true/false in document)">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v6h10V5H3z"/></svg>
         <span>Slides</span>
-      </button>
-      <button id="btn-present-mode" class="tool-btn" title="Present Single Slide (Left/Right arrow keys)">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5V3z"/></svg>
-        <span>Present</span>
       </button>
     </div>
     <div class="tool-group">
@@ -1001,7 +981,6 @@ export class BotoxPreviewPanel {
     const btnPrevPage = document.getElementById('btn-prev-page');
     const btnNextPage = document.getElementById('btn-next-page');
     const btnToggleSlides = document.getElementById('btn-toggle-slides');
-    const btnPresentMode = document.getElementById('btn-present-mode');
     const btnErrorBadge = document.getElementById('btn-error-badge');
     const errorHud = document.getElementById('error-hud');
     const errorHudHeader = document.getElementById('error-hud-header');
@@ -1498,20 +1477,6 @@ export class BotoxPreviewPanel {
           targetY += pageRemainder * (nextBox.top - pageBox.top);
         } else {
           targetY += pageRemainder * pageBox.height;
-        }
-      }
-
-      if (isSlideMode) {
-        for (let i = 0; i < cachedPageMetrics.length; i++) {
-          const m = cachedPageMetrics[i];
-          if (targetY >= m.top && targetY <= m.top + m.height) {
-            scrollToPage(i);
-            break;
-          }
-        }
-        return;
-      }
-
       // Centered vertically in viewport!
       const centeredTarget = targetY - halfViewport;
       const clampedTarget = Math.max(0, Math.min(centeredTarget, maxScroll));
@@ -1519,7 +1484,6 @@ export class BotoxPreviewPanel {
     }
 
     let currentPageIndex = 0;
-    let isSlideMode = false;
 
     function setupPageBox(pageBox, svgContent, i, targetWidth) {
       const isPauseStep = svgContent.includes('data-pause-step="true"') || svgContent.includes('pause-step');
@@ -1590,18 +1554,6 @@ export class BotoxPreviewPanel {
       }
     }
 
-    function updateSlideView() {
-      const pages = container.querySelectorAll('.page-box');
-      pages.forEach((p, idx) => {
-        if (idx === currentPageIndex) {
-          p.classList.add('active-slide');
-        } else {
-          p.classList.remove('active-slide');
-        }
-      });
-      updatePageIndicator();
-    }
-
     function scrollToPage(pageIdx) {
       if (cachedPageMetrics.length === 0) {
         updatePageMetrics();
@@ -1611,11 +1563,6 @@ export class BotoxPreviewPanel {
       const clamped = Math.max(0, Math.min(pageIdx, total - 1));
       currentPageIndex = clamped;
       updatePageIndicator();
-
-      if (isSlideMode) {
-        updateSlideView();
-        return;
-      }
 
       const m = cachedPageMetrics[clamped];
       if (m && m.height > 0) {
@@ -1685,12 +1632,7 @@ export class BotoxPreviewPanel {
       renderedPageSvgs.length = pages.length;
 
       updatePageMetrics();
-
-      if (isSlideMode) {
-        updateSlideView();
-      } else {
-        updatePageIndicator();
-      }
+      updatePageIndicator();
 
       // Preserve relative reading position if total height shifted
       if (prevScrollHeight > 0 && prevScrollTop > 0 && Math.abs(container.scrollHeight - prevScrollHeight) > 10) {
@@ -1700,7 +1642,7 @@ export class BotoxPreviewPanel {
     }
 
     container.addEventListener('scroll', () => {
-      if (cachedPageMetrics.length === 0 || isSlideMode) return;
+      if (cachedPageMetrics.length === 0) return;
       const scrollCenter = container.scrollTop + container.clientHeight / 2;
       for (let i = 0; i < cachedPageMetrics.length; i++) {
         const m = cachedPageMetrics[i];
@@ -1719,15 +1661,11 @@ export class BotoxPreviewPanel {
       pageInput.addEventListener('change', () => {
         const val = parseInt(pageInput.value, 10);
         if (isNaN(val)) return;
-        if (isSlideMode) {
-          scrollToPage(val - 1);
-        } else {
-          const visiblePages = Array.from(container.querySelectorAll('.page-box:not(.pause-step)'));
-          const targetBox = visiblePages[val - 1];
-          if (targetBox) {
-            const allPages = Array.from(container.querySelectorAll('.page-box'));
-            scrollToPage(allPages.indexOf(targetBox));
-          }
+        const visiblePages = Array.from(container.querySelectorAll('.page-box:not(.pause-step)'));
+        const targetBox = visiblePages[val - 1];
+        if (targetBox) {
+          const allPages = Array.from(container.querySelectorAll('.page-box'));
+          scrollToPage(allPages.indexOf(targetBox));
         }
       });
       pageInput.addEventListener('keydown', (e) => {
@@ -1739,14 +1677,12 @@ export class BotoxPreviewPanel {
 
     if (btnPrevPage) {
       btnPrevPage.addEventListener('click', () => {
-        const nextIdx = isSlideMode ? currentPageIndex - 1 : getPrevVisibleIndex(currentPageIndex);
-        scrollToPage(nextIdx);
+        scrollToPage(getPrevVisibleIndex(currentPageIndex));
       });
     }
     if (btnNextPage) {
       btnNextPage.addEventListener('click', () => {
-        const nextIdx = isSlideMode ? currentPageIndex + 1 : getNextVisibleIndex(currentPageIndex);
-        scrollToPage(nextIdx);
+        scrollToPage(getNextVisibleIndex(currentPageIndex));
       });
     }
 
@@ -1759,28 +1695,6 @@ export class BotoxPreviewPanel {
           command: 'toggleDocumentSlides',
           isSlides: nextVal
         });
-      });
-    }
-
-    if (btnPresentMode) {
-      btnPresentMode.addEventListener('click', () => {
-        isSlideMode = !isSlideMode;
-        if (isSlideMode) {
-          btnPresentMode.classList.add('active');
-          container.classList.add('slide-mode');
-          updateSlideView();
-        } else {
-          btnPresentMode.classList.remove('active');
-          container.classList.remove('slide-mode');
-          const pages = container.querySelectorAll('.page-box');
-          pages.forEach(p => p.classList.remove('active-slide'));
-          if (pages[currentPageIndex] && pages[currentPageIndex].classList.contains('pause-step')) {
-            currentPageIndex = getNextVisibleIndex(currentPageIndex);
-          }
-          applyScaleToPages();
-          scrollToPage(currentPageIndex);
-          updatePageIndicator();
-        }
       });
     }
 
@@ -1829,40 +1743,14 @@ export class BotoxPreviewPanel {
 
     // Keyboard shortcuts in webview
     window.addEventListener('keydown', (e) => {
-      if (isSlideMode) {
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
-          e.preventDefault();
-          scrollToPage(currentPageIndex + 1);
-          return;
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
-          e.preventDefault();
-          scrollToPage(currentPageIndex - 1);
-          return;
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          isSlideMode = false;
-          if (btnPresentMode) btnPresentMode.classList.remove('active');
-          container.classList.remove('slide-mode');
-          const pages = container.querySelectorAll('.page-box');
-          pages.forEach(p => p.classList.remove('active-slide'));
-          if (pages[currentPageIndex] && pages[currentPageIndex].classList.contains('pause-step')) {
-            currentPageIndex = getNextVisibleIndex(currentPageIndex);
-          }
-          applyScaleToPages();
-          scrollToPage(currentPageIndex);
-          updatePageIndicator();
-          return;
-        }
-      } else {
-        if (e.key === 'PageDown') {
-          e.preventDefault();
-          scrollToPage(getNextVisibleIndex(currentPageIndex));
-          return;
-        } else if (e.key === 'PageUp') {
-          e.preventDefault();
-          scrollToPage(getPrevVisibleIndex(currentPageIndex));
-          return;
-        }
+      if (e.key === 'PageDown') {
+        e.preventDefault();
+        scrollToPage(getNextVisibleIndex(currentPageIndex));
+        return;
+      } else if (e.key === 'PageUp') {
+        e.preventDefault();
+        scrollToPage(getPrevVisibleIndex(currentPageIndex));
+        return;
       }
 
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
@@ -1900,13 +1788,6 @@ export class BotoxPreviewPanel {
           renderThemeOptions(message.isSlides, message.activeTheme);
           if (btnToggleSlides) {
             btnToggleSlides.classList.toggle('active', message.isSlides);
-          }
-          if (message.isSlides === false && isSlideMode) {
-            isSlideMode = false;
-            if (btnPresentMode) btnPresentMode.classList.remove('active');
-            container.classList.remove('slide-mode');
-            const pages = container.querySelectorAll('.page-box');
-            pages.forEach(p => p.classList.remove('active-slide'));
           }
         } else if (message.activeTheme && themeSelect) {
           themeSelect.value = message.activeTheme;
