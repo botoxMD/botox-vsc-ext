@@ -102,64 +102,22 @@ export function hasBotoxBinary(): boolean {
     }
 }
 
-function downloadFile(url: string, dest: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const follow = (curUrl: string, maxRedirects: number = 6) => {
-            if (maxRedirects <= 0) {
-                return reject(new Error('Too many redirects while downloading Botox binary'));
-            }
-            https.get(curUrl, { headers: { 'User-Agent': 'vscode-botox' } }, (res) => {
-                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                    return follow(res.headers.location, maxRedirects - 1);
-                }
-                if (res.statusCode !== 200) {
-                    return reject(new Error(`Download failed with HTTP ${res.statusCode}: ${res.statusMessage}`));
-                }
-                const fileStream = fs.createWriteStream(dest);
-                res.pipe(fileStream);
-                fileStream.on('finish', () => {
-                    fileStream.close();
-                    resolve();
-                });
-                fileStream.on('error', (err) => {
-                    try { fs.unlinkSync(dest); } catch {}
-                    reject(err);
-                });
-            }).on('error', (err) => {
-                try { fs.unlinkSync(dest); } catch {}
-                reject(err);
-            });
-        };
-        follow(url);
-    });
-}
+export const BOTOX_CLI_REPO_URL = 'https://github.com/botoxMD/botox-cli';
 
-function fetchReleaseAssetUrl(target: string, ext: string): Promise<string> {
-    const fallback = `https://github.com/botoxMD/botox-cli/releases/latest/download/botox-v0.1.1-${target}.${ext}`;
-    return new Promise((resolve) => {
-        https.get('https://api.github.com/repos/botoxMD/botox-cli/releases/latest', {
-            headers: { 'User-Agent': 'vscode-botox' }
-        }, (res) => {
-            if (res.statusCode !== 200) {
-                return resolve(fallback);
-            }
-            let body = '';
-            res.on('data', chunk => { body += chunk; });
-            res.on('end', () => {
-                try {
-                    const data = JSON.parse(body);
-                    const targetSuffix = `-${target}.${ext}`;
-                    const asset = data.assets?.find((a: any) =>
-                        typeof a.name === 'string' && (a.name.endsWith(targetSuffix) || a.name === `botox-${target}.${ext}`)
-                    );
-                    if (asset && asset.browser_download_url) {
-                        return resolve(asset.browser_download_url);
-                    }
-                } catch {}
-                resolve(fallback);
-            });
-        }).on('error', () => resolve(fallback));
-    });
+export async function promptInstallBotoxBinary(): Promise<void> {
+    const installAction = 'Install Botox (GitHub)';
+    const settingsAction = 'Configure Path';
+    const choice = await vscode.window.showErrorMessage(
+        'Botox compiler binary not found. Please install the Botox CLI to compile documents and view live previews.',
+        installAction,
+        settingsAction
+    );
+
+    if (choice === installAction) {
+        vscode.env.openExternal(vscode.Uri.parse(BOTOX_CLI_REPO_URL));
+    } else if (choice === settingsAction) {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'botox.executablePath');
+    }
 }
 
 export async function ensureBotoxBinary(): Promise<string> {
@@ -168,57 +126,8 @@ export async function ensureBotoxBinary(): Promise<string> {
         return current;
     }
 
-    if (!extensionContext) {
-        return current;
-    }
-
-    const platform = process.platform;
-    const arch = process.arch;
-    let target = '';
-
-    if (platform === 'linux') {
-        target = arch === 'x64' ? 'x86_64-unknown-linux-musl' : (arch === 'arm64' ? 'aarch64-unknown-linux-gnu' : '');
-    } else if (platform === 'darwin') {
-        target = arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
-    } else if (platform === 'win32' && arch === 'x64') {
-        target = 'x86_64-pc-windows-msvc';
-    }
-
-    if (!target) {
-        return current;
-    }
-
-    const isWin = platform === 'win32';
-    const ext = isWin ? 'zip' : 'tar.gz';
-    const archiveName = `botox-${target}.${ext}`;
-    const downloadUrl = await fetchReleaseAssetUrl(target, ext);
-
-    const destDir = path.join(extensionContext.globalStorageUri.fsPath, 'bin');
-    fs.mkdirSync(destDir, { recursive: true });
-    const destBinary = path.join(destDir, isWin ? 'botox.exe' : 'botox');
-
-    return vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Notification,
-            title: `Botox: Downloading standalone compiler for ${platform}-${arch}...`,
-            cancellable: false
-        },
-        async (progress) => {
-            const tempArchive = path.join(destDir, archiveName);
-            progress.report({ message: 'Downloading prebuilt release from GitHub...' });
-            await downloadFile(downloadUrl, tempArchive);
-
-            progress.report({ message: 'Extracting...' });
-            child_process.execSync(`tar -xf "${tempArchive}" -C "${destDir}"`);
-            try { fs.unlinkSync(tempArchive); } catch {}
-
-            if (!isWin && fs.existsSync(destBinary)) {
-                fs.chmodSync(destBinary, 0o755);
-            }
-
-            return destBinary;
-        }
-    );
+    await promptInstallBotoxBinary();
+    throw new Error(`Botox CLI binary is not installed. Please install it from ${BOTOX_CLI_REPO_URL}`);
 }
 
 const activePreviewProcs = new Map<string, child_process.ChildProcess>();

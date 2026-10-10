@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { resolveBotoxBinary } from './compiler';
+import { hasBotoxBinary, promptInstallBotoxBinary, resolveBotoxBinary } from './compiler';
 
 export function getGlobalConfigPath(): string {
     if (process.platform === 'win32' && process.env.APPDATA) {
@@ -255,6 +255,10 @@ export async function runSetupWizard(context: vscode.ExtensionContext, isFirstRu
 }
 
 export function runSetupInTerminal() {
+    if (!hasBotoxBinary()) {
+        promptInstallBotoxBinary();
+        return;
+    }
     const binary = resolveBotoxBinary();
     const terminal = vscode.window.createTerminal({
         name: 'Botox Setup',

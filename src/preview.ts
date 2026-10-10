@@ -104,6 +104,12 @@ export class BotoxPreviewPanel {
                     case 'exportPdf':
                         vscode.commands.executeCommand('botox.compilePdf', this._documentUri, this._activeDocumentTheme);
                         return;
+                    case 'installBinary':
+                        vscode.env.openExternal(vscode.Uri.parse('https://github.com/botoxMD/botox-cli'));
+                        return;
+                    case 'openSettings':
+                        vscode.commands.executeCommand('workbench.action.openSettings', 'botox.executablePath');
+                        return;
                     case 'toggleSyncScroll': {
                         const config = vscode.workspace.getConfiguration('botox');
                         const current = config.get<boolean>('syncScroll', true);
@@ -1150,7 +1156,15 @@ export class BotoxPreviewPanel {
       let sub = 'Typst encountered an issue compiling your Markdown';
       let tip = 'Check for unclosed delimiters (*, _, [, ]), unescaped $, or frontmatter YAML formatting.';
 
-      if ((msg || '').includes('[LaTeX Error]') || (msg || '').includes('LaTeX Error')) {
+      let isMissingCli = (msg || '').includes('Botox compiler binary not found') ||
+                         (msg || '').includes('Botox CLI binary is not installed') ||
+                         (msg || '').includes('Could not obtain Botox compiler binary');
+
+      if (isMissingCli) {
+        category = 'Botox CLI Required';
+        sub = 'The standalone Botox command-line binary is not installed';
+        tip = 'Install the Botox CLI binary on your system, or set its custom location in VS Code Settings.';
+      } else if ((msg || '').includes('[LaTeX Error]') || (msg || '').includes('LaTeX Error')) {
         category = 'LaTeX Error';
         sub = 'Mathematical formula or LaTeX syntax issue detected';
         tip = 'Check your LaTeX math syntax, unclosed braces ({, }), missing fractions, or math symbols.';
@@ -1173,6 +1187,18 @@ export class BotoxPreviewPanel {
       if (renderedPageSvgs.length === 0) {
         if (pageTotal) pageTotal.textContent = '!';
         errorHud.style.display = 'none';
+
+        const actionsHtml = isMissingCli
+          ? '<div class="full-error-actions">' +
+              '<button id="btn-full-install" class="primary">Install Botox CLI (GitHub)</button>' +
+              '<button id="btn-full-settings">Configure Path</button>' +
+              '<button id="btn-full-retry">Retry</button>' +
+            '</div>'
+          : '<div class="full-error-actions">' +
+              '<button id="btn-full-copy" class="primary">Copy Error Details</button>' +
+              '<button id="btn-full-retry">Retry Compilation</button>' +
+            '</div>';
+
         container.innerHTML =
           '<div class="full-error-container">' +
             '<div class="full-error-card">' +
@@ -1186,15 +1212,19 @@ export class BotoxPreviewPanel {
                 '</div>' +
               '</div>' +
               '<div class="full-error-code">' + escapeHtml(msg) + '</div>' +
-              '<div class="full-error-actions">' +
-                '<button id="btn-full-copy" class="primary">Copy Error Details</button>' +
-                '<button id="btn-full-retry">Retry Compilation</button>' +
-              '</div>' +
+              actionsHtml +
               '<div class="full-error-hint">' +
                 '<strong>Tip:</strong> ' + tip +
               '</div>' +
             '</div>' +
           '</div>';
+
+        document.getElementById('btn-full-install')?.addEventListener('click', () => {
+          vscode.postMessage({ command: 'installBinary' });
+        });
+        document.getElementById('btn-full-settings')?.addEventListener('click', () => {
+          vscode.postMessage({ command: 'openSettings' });
+        });
         document.getElementById('btn-full-copy')?.addEventListener('click', function() {
           copyToClipboard(currentErrorMessage, this);
         });
