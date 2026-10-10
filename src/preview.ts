@@ -1259,7 +1259,7 @@ export class BotoxPreviewPanel {
       const pages = container.querySelectorAll('.page-box');
       cachedPageMetrics = [];
       for (let i = 0; i < pages.length; i++) {
-        if (!isSlideMode && pages[i].classList.contains('pause-step')) {
+        if (pages[i].classList.contains('pause-step')) {
           cachedPageMetrics.push({ top: 0, height: 0 });
           continue;
         }
@@ -1569,19 +1569,13 @@ export class BotoxPreviewPanel {
         pageTotal.textContent = '0';
         return;
       }
-      if (isSlideMode) {
-        pageTotal.textContent = allPages.length;
-        pageInput.max = allPages.length;
-        pageInput.value = currentPageIndex + 1;
-      } else {
-        const visiblePages = Array.from(allPages).filter(p => !p.classList.contains('pause-step'));
-        const totalVisible = visiblePages.length > 0 ? visiblePages.length : allPages.length;
-        pageTotal.textContent = totalVisible;
-        pageInput.max = totalVisible;
-        const curBox = allPages[currentPageIndex];
-        const vIdx = visiblePages.indexOf(curBox);
-        pageInput.value = (vIdx >= 0 ? vIdx : 0) + 1;
-      }
+      const visiblePages = Array.from(allPages).filter(p => !p.classList.contains('pause-step'));
+      const totalVisible = visiblePages.length > 0 ? visiblePages.length : allPages.length;
+      pageTotal.textContent = totalVisible;
+      pageInput.max = totalVisible;
+      const curBox = allPages[currentPageIndex];
+      const vIdx = visiblePages.indexOf(curBox);
+      pageInput.value = (vIdx >= 0 ? vIdx : 0) + 1;
     }
 
     function scrollToPage(pageIdx) {

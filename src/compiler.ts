@@ -3,7 +3,6 @@ import * as child_process from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as https from 'https';
 
 export interface CompilationResult {
     success: boolean;
@@ -64,27 +63,7 @@ export function resolveBotoxBinary(): string {
         return homeLocalBin;
     }
 
-    if (extensionContext) {
-        // 3. Bundled binary inside the extension's `bin/` directory
-        const directBundled = path.join(extensionContext.extensionPath, 'bin', binName);
-        if (fs.existsSync(directBundled)) {
-            return directBundled;
-        }
-
-        // 4. Platform/arch-specific bundled directory (e.g. `bin/linux-x64/botox`)
-        const platformArch = `${process.platform}-${process.arch}`;
-        const archBundled = path.join(extensionContext.extensionPath, 'bin', platformArch, binName);
-        if (fs.existsSync(archBundled)) {
-            return archBundled;
-        }
-
-        // 5. Downloaded/cached binary in VS Code global storage
-        const storageBin = path.join(extensionContext.globalStorageUri.fsPath, 'bin', binName);
-        if (fs.existsSync(storageBin)) {
-            return storageBin;
-        }
-    }
-
+    // 3. System PATH or default binary name
     return binName;
 }
 
