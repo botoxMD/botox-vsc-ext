@@ -1507,6 +1507,9 @@ export class BotoxPreviewPanel {
           targetY += pageRemainder * (nextBox.top - pageBox.top);
         } else {
           targetY += pageRemainder * pageBox.height;
+        }
+      }
+
       // Centered vertically in viewport!
       const centeredTarget = targetY - halfViewport;
       const clampedTarget = Math.max(0, Math.min(centeredTarget, maxScroll));
