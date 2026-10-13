@@ -352,6 +352,7 @@ export class BotoxPreviewPanel {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this._panel.webview.cspSource} 'unsafe-inline'; script-src 'unsafe-inline'; img-src ${this._panel.webview.cspSource} data: https: blob:; font-src ${this._panel.webview.cspSource} data:;">
   <title>Botox Preview: ${title}</title>
   <style>
     :root {

@@ -168,20 +168,10 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     if (doc) {
         const lineCount = doc.lineCount;
 
-        // If line is out of document bounds (e.g. Typst generated preamble offset ~146 lines):
-        if (foundLine !== undefined && foundLine >= lineCount) {
-            const preambleCorrected = foundLine - 146;
-            if (preambleCorrected >= 0 && preambleCorrected < lineCount) {
-                foundLine = preambleCorrected;
-            } else {
-                foundLine = lineCount - 1;
-            }
-        }
-
         // If we have a target token, search near foundLine or throughout the document
         if (token && token.length > 0) {
             let tokenFound = false;
-            if (foundLine !== undefined) {
+            if (foundLine !== undefined && foundLine >= 0 && foundLine < lineCount) {
                 const searchStart = Math.max(0, foundLine - 10);
                 const searchEnd = Math.min(lineCount - 1, foundLine + 10);
                 for (let l = searchStart; l <= searchEnd; l++) {
@@ -196,7 +186,7 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
                 }
             }
 
-            if (!tokenFound && (foundLine === undefined || foundLine >= lineCount)) {
+            if (!tokenFound) {
                 for (let l = 0; l < lineCount; l++) {
                     const text = doc.lineAt(l).text;
                     const idx = text.indexOf(token);
@@ -207,6 +197,11 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
                     }
                 }
             }
+        }
+
+        // If line is out of document bounds, clamp to document end
+        if (foundLine !== undefined && foundLine >= lineCount) {
+            foundLine = lineCount - 1;
         }
 
         if (foundLine !== undefined && foundLine >= 0 && foundLine < lineCount) {

@@ -63,7 +63,13 @@ export function resolveBotoxBinary(): string {
         return homeLocalBin;
     }
 
-    // 3. System PATH or default binary name
+    // 3. Cargo binary path (~/.cargo/bin/botox)
+    const cargoBin = path.join(os.homedir(), '.cargo', 'bin', binName);
+    if (fs.existsSync(cargoBin)) {
+        return cargoBin;
+    }
+
+    // 4. System PATH or default binary name
     return binName;
 }
 
