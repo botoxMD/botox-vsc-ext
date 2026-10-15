@@ -140,6 +140,164 @@ function getExecutionEnv(): NodeJS.ProcessEnv {
     };
 }
 
+class BotoxDaemonClient {
+    private proc: child_process.ChildProcess | null = null;
+    private nextId = 1;
+    private pendingRequests = new Map<number, (resp: any) => void>();
+    private buffer = '';
+    private binaryPath = '';
+
+    private ensureStarted(binary: string): boolean {
+        if (this.proc && !this.proc.killed && this.binaryPath === binary) {
+            return true;
+        }
+        if (this.proc) {
+            try { this.proc.kill(); } catch {}
+            this.proc = null;
+        }
+        this.binaryPath = binary;
+        this.buffer = '';
+        try {
+            const proc = child_process.spawn(binary, ['daemon'], {
+                env: getExecutionEnv(),
+                stdio: ['pipe', 'pipe', 'ignore'],
+            });
+
+            proc.stdout?.on('data', (chunk: Buffer) => {
+                this.buffer += chunk.toString();
+                let idx: number;
+                while ((idx = this.buffer.indexOf('\n')) !== -1) {
+                    const line = this.buffer.slice(0, idx).trim();
+                    this.buffer = this.buffer.slice(idx + 1);
+                    if (!line) continue;
+                    try {
+                        const parsed = JSON.parse(line);
+                        const id = parsed.id;
+                        if (id !== undefined && this.pendingRequests.has(id)) {
+                            const cb = this.pendingRequests.get(id)!;
+                            this.pendingRequests.delete(id);
+                            cb(parsed);
+                        }
+                    } catch {
+                        // ignore malformed line
+                    }
+                }
+            });
+
+            proc.on('close', () => {
+                if (this.proc === proc) {
+                    this.proc = null;
+                }
+                for (const [id, cb] of this.pendingRequests) {
+                    cb({ status: 'error', error: 'Daemon process closed' });
+                }
+                this.pendingRequests.clear();
+            });
+
+            proc.on('error', () => {
+                if (this.proc === proc) {
+                    this.proc = null;
+                }
+            });
+
+            this.proc = proc;
+            return true;
+        } catch {
+            this.proc = null;
+            return false;
+        }
+    }
+
+    public async compile(
+        binary: string,
+        inputPath: string,
+        markdown: string,
+        theme?: string
+    ): Promise<VectorCompilationResult | null> {
+        if (!this.ensureStarted(binary)) {
+            return null;
+        }
+
+        const id = this.nextId++;
+        const inputDir = path.dirname(inputPath);
+        const req = {
+            id,
+            action: 'compile',
+            markdown,
+            resource_dir: inputDir,
+            source_file: inputPath,
+            theme,
+        };
+
+        const startTime = Date.now();
+        return new Promise<VectorCompilationResult | null>((resolve) => {
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    resolve(null);
+                }
+            }, 6000);
+
+            this.pendingRequests.set(id, (resp: any) => {
+                clearTimeout(timer);
+                const durationMs = Date.now() - startTime;
+                if (!resp || typeof resp !== 'object') {
+                    resolve(null);
+                    return;
+                }
+                if (resp.status !== 'ok') {
+                    resolve({
+                        success: false,
+                        error: cleanCompilerError(resp.error || 'Unknown compilation error', path.basename(inputPath)),
+                        durationMs,
+                    });
+                    return;
+                }
+
+                resolve({
+                    success: true,
+                    pages: resp.pages || [],
+                    headings: resp.headings || [],
+                    numPages: resp.num_pages || resp.pages?.length || 0,
+                    isSlides: Boolean(resp.is_slides),
+                    pauseIndices: resp.pause_indices || [],
+                    durationMs,
+                });
+            });
+
+            try {
+                if (!this.proc || !this.proc.stdin || !this.proc.stdin.writable) {
+                    clearTimeout(timer);
+                    this.pendingRequests.delete(id);
+                    resolve(null);
+                    return;
+                }
+                this.proc.stdin.write(JSON.stringify(req) + '\n');
+            } catch {
+                clearTimeout(timer);
+                this.pendingRequests.delete(id);
+                resolve(null);
+            }
+        });
+    }
+
+    public dispose() {
+        if (this.proc && !this.proc.killed) {
+            try {
+                this.proc.stdin?.write(JSON.stringify({ id: 0, action: 'shutdown' }) + '\n');
+                this.proc.kill();
+            } catch {}
+            this.proc = null;
+        }
+    }
+}
+
+const daemonClient = new BotoxDaemonClient();
+
+export function disposeDaemonClient() {
+    daemonClient.dispose();
+}
+
 export async function compileForPreview(
     inputPath: string,
     liveContent?: string,
@@ -156,6 +314,19 @@ export async function compileForPreview(
             error: `Could not obtain Botox compiler binary: ${e.message}`
         };
     }
+
+    // High-speed daemon compilation path for live keystroke edits
+    if (typeof liveContent === 'string') {
+        try {
+            const daemonResult = await daemonClient.compile(binary, inputPath, liveContent, theme);
+            if (daemonResult) {
+                return daemonResult;
+            }
+        } catch {
+            // Fall back seamlessly to one-shot CLI execution
+        }
+    }
+
     const startTime = Date.now();
     const targetOutput = path.join(
         os.tmpdir(),

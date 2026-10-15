@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { BotoxPreviewPanel, BotoxPreviewSerializer } from './preview';
-import { compileDocument, runInit, setExtensionContext } from './compiler';
+import { compileDocument, runInit, setExtensionContext, disposeDaemonClient } from './compiler';
 import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup, resetSetupState } from './setup';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
@@ -643,5 +643,6 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 }
 
 export function deactivate() {
+    disposeDaemonClient();
     BotoxPreviewPanel.currentPanels.forEach(panel => panel.dispose());
 }
