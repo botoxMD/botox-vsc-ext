@@ -457,7 +457,7 @@ export async function compileDocument(
     }
     const startTime = Date.now();
     const baseStem = path.basename(inputPath).replace(/\.(btx(\.md)?|md|markdown)$/i, '');
-    const targetOutput = outputPath || path.join(os.tmpdir(), `botox_preview_${Date.now()}_${baseStem}.pdf`);
+    const targetOutput = outputPath || path.join(path.dirname(inputPath), `${baseStem}.pdf`);
     const args = [inputPath, '-o', targetOutput, ...extraArgs];
 
     const inputDir = path.dirname(inputPath);

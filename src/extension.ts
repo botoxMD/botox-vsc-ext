@@ -321,15 +321,36 @@ export function activate(context: vscode.ExtensionContext) {
                 /(slides|deck|presentation)(\.btx)?(\.md)?$/i.test(inputPath);
 
             const defaultExt = isSlides ? 'html' : 'pdf';
-            const defaultOutputPath = inputPath.replace(/\.(btx(\.md)?|md|markdown)$/i, `.${defaultExt}`);
+            const defaultDir = path.dirname(inputPath);
+            const baseStem = path.basename(inputPath).replace(/\.(btx(\.md)?|md|markdown)$/i, '');
+            const defaultFilename = `${baseStem}.${defaultExt}`;
+            const defaultOutputPath = path.join(defaultDir, defaultFilename);
 
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(defaultOutputPath),
-                filters: isSlides
-                    ? { 'HTML Presentation Slides': ['html', 'htm'], 'PDF Document': ['pdf'] }
-                    : { 'PDF Document': ['pdf'], 'HTML Document': ['html', 'htm'] },
-                title: isSlides ? 'Export Presentation Slides with Botox' : 'Export PDF with Botox'
-            });
+            const fileExistedBefore = fs.existsSync(defaultOutputPath);
+            if (!fileExistedBefore) {
+                try {
+                    fs.writeFileSync(defaultOutputPath, '');
+                } catch {}
+            }
+
+            let saveUri: vscode.Uri | undefined;
+            try {
+                saveUri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(defaultOutputPath),
+                    filters: isSlides
+                        ? { 'HTML Presentation Slides': ['html', 'htm'], 'PDF Document': ['pdf'] }
+                        : { 'PDF Document': ['pdf'], 'HTML Document': ['html', 'htm'] },
+                    title: isSlides ? 'Export Presentation Slides with Botox' : 'Export PDF with Botox'
+                });
+            } finally {
+                if (!fileExistedBefore && fs.existsSync(defaultOutputPath)) {
+                    if (!saveUri || saveUri.fsPath !== defaultOutputPath) {
+                        try {
+                            fs.unlinkSync(defaultOutputPath);
+                        } catch {}
+                    }
+                }
+            }
 
             if (!saveUri) {
                 return;
@@ -343,7 +364,7 @@ export function activate(context: vscode.ExtensionContext) {
                     cancellable: false
                 },
                 async () => {
-                    return await compileDocument(inputPath, saveUri.fsPath, extraArgs);
+                    return await compileDocument(inputPath, saveUri!.fsPath, extraArgs);
                 }
             );
 
@@ -356,7 +377,7 @@ export function activate(context: vscode.ExtensionContext) {
                     openItem
                 ).then(action => {
                     if (action === openItem) {
-                        vscode.env.openExternal(saveUri);
+                        vscode.env.openExternal(saveUri!);
                     }
                 });
             } else {
@@ -382,20 +403,40 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            let defaultOutputPath: string;
+            let defaultFilename: string;
             if (inputPath.endsWith('.btx.md')) {
-                defaultOutputPath = inputPath.slice(0, -'.btx.md'.length) + '.md';
+                defaultFilename = path.basename(inputPath).slice(0, -'.btx.md'.length) + '.md';
             } else if (inputPath.endsWith('.btx')) {
-                defaultOutputPath = inputPath.slice(0, -'.btx'.length) + '.md';
+                defaultFilename = path.basename(inputPath).slice(0, -'.btx'.length) + '.md';
             } else {
-                defaultOutputPath = inputPath.replace(/\.(md|markdown)$/i, '.export.md');
+                defaultFilename = path.basename(inputPath).replace(/\.(md|markdown)$/i, '.export.md');
+            }
+            const defaultDir = path.dirname(inputPath);
+            const defaultOutputPath = path.join(defaultDir, defaultFilename);
+
+            const fileExistedBefore = fs.existsSync(defaultOutputPath);
+            if (!fileExistedBefore) {
+                try {
+                    fs.writeFileSync(defaultOutputPath, '');
+                } catch {}
             }
 
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(defaultOutputPath),
-                filters: { 'Markdown Document': ['md', 'markdown'] },
-                title: 'Export to Normal Markdown with Botox'
-            });
+            let saveUri: vscode.Uri | undefined;
+            try {
+                saveUri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(defaultOutputPath),
+                    filters: { 'Markdown Document': ['md', 'markdown'] },
+                    title: 'Export to Normal Markdown with Botox'
+                });
+            } finally {
+                if (!fileExistedBefore && fs.existsSync(defaultOutputPath)) {
+                    if (!saveUri || saveUri.fsPath !== defaultOutputPath) {
+                        try {
+                            fs.unlinkSync(defaultOutputPath);
+                        } catch {}
+                    }
+                }
+            }
 
             if (!saveUri) {
                 return;
