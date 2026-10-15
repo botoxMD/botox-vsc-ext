@@ -1865,7 +1865,7 @@ export class BotoxPreviewSerializer implements vscode.WebviewPanelSerializer {
         let uriString = state?.documentUri;
         if (!uriString) {
             const active = vscode.window.activeTextEditor;
-            if (active && (active.document.languageId === 'markdown' || active.document.fileName.endsWith('.md'))) {
+            if (active && (active.document.languageId === 'markdown' || /\.(md|markdown|btx|btx\.md)$/i.test(active.document.fileName))) {
                 uriString = active.document.uri.toString();
             }
         }

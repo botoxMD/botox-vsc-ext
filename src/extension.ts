@@ -9,6 +9,15 @@ let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
 let statusBarItem: vscode.StatusBarItem;
 
+export function isBotoxDocumentPath(filePath: string): boolean {
+    return /\.(md|markdown|btx|btx\.md)$/i.test(filePath);
+}
+
+export function isBotoxDocument(doc: vscode.TextDocument | undefined): boolean {
+    if (!doc) return false;
+    return doc.languageId === 'markdown' || isBotoxDocumentPath(doc.fileName);
+}
+
 export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg?: string, errorCategory?: string) {
     if (!statusBarItem) return;
     const config = vscode.workspace.getConfiguration('botox');
@@ -18,7 +27,7 @@ export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg
     }
 
     const editor = vscode.window.activeTextEditor;
-    const isMd = editor && (editor.document.languageId === 'markdown' || editor.document.fileName.endsWith('.md'));
+    const isMd = editor && isBotoxDocument(editor.document);
     const hasPanels = BotoxPreviewPanel.currentPanels.size > 0;
 
     if (!isMd && !hasPanels) {
@@ -283,8 +292,8 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showWarningMessage('Botox: No active Markdown document to preview.');
                 return;
             }
-            if (!documentUri.fsPath.endsWith('.md') && !documentUri.fsPath.endsWith('.markdown')) {
-                vscode.window.showWarningMessage('Botox: Active file is not a Markdown document.');
+            if (!isBotoxDocumentPath(documentUri.fsPath)) {
+                vscode.window.showWarningMessage('Botox: Active file is not a Markdown or Botox document.');
                 return;
             }
             BotoxPreviewPanel.createOrShow(documentUri, vscode.ViewColumn.Beside);
@@ -297,7 +306,7 @@ export function activate(context: vscode.ExtensionContext) {
         async (uri?: vscode.Uri, theme?: string) => {
             const documentUri = uri || vscode.window.activeTextEditor?.document.uri;
             if (!documentUri) {
-                vscode.window.showWarningMessage('Botox: No active Markdown document to compile.');
+                vscode.window.showWarningMessage('Botox: No active Markdown or Botox document to compile.');
                 return;
             }
 
@@ -309,10 +318,10 @@ export function activate(context: vscode.ExtensionContext) {
             } catch {}
 
             const isSlides = /^(marp|slides|presentation):\s*true/im.test(fileContent) ||
-                /(slides|deck|presentation)\.md$/i.test(inputPath);
+                /(slides|deck|presentation)(\.btx)?(\.md)?$/i.test(inputPath);
 
             const defaultExt = isSlides ? 'html' : 'pdf';
-            const defaultOutputPath = inputPath.replace(/\.(md|markdown)$/i, `.${defaultExt}`);
+            const defaultOutputPath = inputPath.replace(/\.(btx(\.md)?|md|markdown)$/i, `.${defaultExt}`);
 
             const saveUri = await vscode.window.showSaveDialog({
                 defaultUri: vscode.Uri.file(defaultOutputPath),
@@ -353,6 +362,72 @@ export function activate(context: vscode.ExtensionContext) {
             } else {
                 reportCompilationFailure(documentUri, result.error || 'Compilation failed');
                 vscode.window.showErrorMessage(`Botox compilation failed: ${result.error}`);
+            }
+        }
+    );
+
+    // 3. Export to Normal Markdown
+    const exportMarkdownCmd = vscode.commands.registerCommand(
+        'botox.exportMarkdown',
+        async (uri?: vscode.Uri) => {
+            const documentUri = uri || vscode.window.activeTextEditor?.document.uri;
+            if (!documentUri) {
+                vscode.window.showWarningMessage('Botox: No active Markdown or Botox document to export.');
+                return;
+            }
+
+            const inputPath = documentUri.fsPath;
+            if (!isBotoxDocumentPath(inputPath)) {
+                vscode.window.showWarningMessage('Botox: Active file is not a Markdown or Botox document.');
+                return;
+            }
+
+            let defaultOutputPath: string;
+            if (inputPath.endsWith('.btx.md')) {
+                defaultOutputPath = inputPath.slice(0, -'.btx.md'.length) + '.md';
+            } else if (inputPath.endsWith('.btx')) {
+                defaultOutputPath = inputPath.slice(0, -'.btx'.length) + '.md';
+            } else {
+                defaultOutputPath = inputPath.replace(/\.(md|markdown)$/i, '.export.md');
+            }
+
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(defaultOutputPath),
+                filters: { 'Markdown Document': ['md', 'markdown'] },
+                title: 'Export to Normal Markdown with Botox'
+            });
+
+            if (!saveUri) {
+                return;
+            }
+
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Exporting Markdown with Botox...',
+                    cancellable: false
+                },
+                async () => {
+                    return await compileDocument(inputPath, saveUri.fsPath, ['--markdown']);
+                }
+            );
+
+            if (result.success) {
+                reportCompilationSuccess(documentUri, result.durationMs);
+                const openItem = 'Open Exported Markdown';
+                vscode.window.showInformationMessage(
+                    `Botox: Exported '${path.basename(saveUri.fsPath)}' in ${result.durationMs}ms`,
+                    openItem
+                ).then(action => {
+                    if (action === openItem) {
+                        vscode.workspace.openTextDocument(saveUri).then(doc => {
+                            vscode.window.showTextDocument(doc);
+                        });
+                    }
+                });
+            } else {
+                reportCompilationFailure(documentUri, result.error || 'Compilation failed');
+                vscode.window.showErrorMessage(`Botox Markdown export failed: ${result.error}`);
             }
         }
     );
@@ -549,7 +624,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 
     function syncScrollToPreview(editor: vscode.TextEditor, line?: number) {
         const fsPath = editor.document.uri.fsPath;
-        if (!fsPath.endsWith('.md') && !fsPath.endsWith('.markdown')) {
+        if (!isBotoxDocumentPath(fsPath)) {
             return;
         }
 
@@ -628,6 +703,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
     context.subscriptions.push(
         openPreviewCmd,
         compilePdfCmd,
+        exportMarkdownCmd,
         initDocumentCmd,
         initSlidesCmd,
         toggleSyncScrollCmd,

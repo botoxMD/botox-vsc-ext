@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.14.9",
+  "version": "0.15.0",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -37,6 +37,7 @@
     "onLanguage:markdown",
     "onCommand:botox.openPreview",
     "onCommand:botox.compilePdf",
+    "onCommand:botox.exportMarkdown",
     "onCommand:botox.initDocument",
     "onCommand:botox.initSlides",
     "onCommand:botox.setup",
@@ -44,6 +45,15 @@
     "onCommand:botox.resetSetup"
   ],
   "contributes": {
+    "languages": [
+      {
+        "id": "markdown",
+        "extensions": [
+          ".btx",
+          ".btx.md"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "botox.setup",
@@ -73,6 +83,12 @@
         "title": "Compile to PDF",
         "category": "Botox",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "botox.exportMarkdown",
+        "title": "Export to Normal Markdown",
+        "category": "Botox",
+        "icon": "$(markdown)"
       },
       {
         "command": "botox.initDocument",
@@ -106,13 +122,18 @@
       "explorer/context": [
         {
           "command": "botox.openPreview",
-          "when": "resourceExtname == .md || resourceExtname == .markdown",
+          "when": "resourceExtname == .md || resourceExtname == .markdown || resourceExtname == .btx",
           "group": "7_modification@1"
         },
         {
           "command": "botox.compilePdf",
-          "when": "resourceExtname == .md || resourceExtname == .markdown",
+          "when": "resourceExtname == .md || resourceExtname == .markdown || resourceExtname == .btx",
           "group": "7_modification@2"
+        },
+        {
+          "command": "botox.exportMarkdown",
+          "when": "resourceExtname == .md || resourceExtname == .markdown || resourceExtname == .btx",
+          "group": "7_modification@3"
         }
       ],
       "editor/context": [
@@ -125,6 +146,11 @@
           "command": "botox.compilePdf",
           "when": "editorLangId == markdown",
           "group": "1_modification@2"
+        },
+        {
+          "command": "botox.exportMarkdown",
+          "when": "editorLangId == markdown",
+          "group": "1_modification@3"
         }
       ]
     },
