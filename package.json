@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.14.7",
+  "version": "0.14.8",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -149,6 +149,11 @@
           "type": "string",
           "default": "botox",
           "description": "Path to the botox CLI executable (defaults to 'botox' on PATH, or ~/.local/bin/botox)."
+        },
+        "botox.krokiUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Kroki server endpoint URL for rendering diagrams (e.g. 'https://kroki.io' or a self-hosted instance 'http://localhost:8000')."
         },
         "botox.autoCompileOnSave": {
           "type": "boolean",

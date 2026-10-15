@@ -131,6 +131,15 @@ export function abortActivePreview(inputPath: string): boolean {
     return false;
 }
 
+function getExecutionEnv(): NodeJS.ProcessEnv {
+    const config = vscode.workspace.getConfiguration('botox');
+    const krokiUrl = config.get<string>('krokiUrl')?.trim();
+    return {
+        ...process.env,
+        ...(krokiUrl ? { KROKI_ENDPOINT: krokiUrl } : {})
+    };
+}
+
 export async function compileForPreview(
     inputPath: string,
     liveContent?: string,
@@ -165,7 +174,8 @@ export async function compileForPreview(
 
     return new Promise((resolve) => {
         const proc = child_process.spawn(binary, args, {
-            cwd: inputDir
+            cwd: inputDir,
+            env: getExecutionEnv()
         });
         activePreviewProcs.set(inputPath, proc);
 
@@ -285,7 +295,7 @@ export async function compileDocument(
         child_process.execFile(
             binary,
             args,
-            { cwd: inputDir, maxBuffer: 10 * 1024 * 1024 },
+            { cwd: inputDir, maxBuffer: 10 * 1024 * 1024, env: getExecutionEnv() },
             (error, stdout, stderr) => {
                 const durationMs = Date.now() - startTime;
                 if (error) {
@@ -344,7 +354,7 @@ export async function runInit(
         child_process.execFile(
             binary,
             ['init', filename],
-            { cwd: targetDir },
+            { cwd: targetDir, env: getExecutionEnv() },
             (error, stdout, stderr) => {
                 if (error) {
                     resolve({ success: false, error: stderr || stdout || error.message });
