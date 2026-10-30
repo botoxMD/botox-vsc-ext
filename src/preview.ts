@@ -854,6 +854,7 @@ export class BotoxPreviewPanel {
       align-items: center;
     }
     #viewer-container {
+      --page-width: 820px;
       flex: 1;
       overflow-y: auto;
       overflow-x: auto;
@@ -866,6 +867,8 @@ export class BotoxPreviewPanel {
       transition: background 0.2s ease;
     }
     .page-box {
+      width: var(--page-width, 820px);
+      max-width: calc(100% - 16px);
       background: var(--page-bg);
       box-shadow: var(--page-shadow);
       border: 1px solid var(--page-border);
@@ -874,9 +877,18 @@ export class BotoxPreviewPanel {
       display: block;
       position: relative;
       flex-shrink: 0;
-      transition: width 0.12s ease-out, background 0.2s ease, box-shadow 0.2s ease;
+      contain: layout style;
+      transform: translateZ(0);
       user-select: text;
       -webkit-user-select: text;
+    }
+    #viewer-container.animating-zoom .page-box {
+      transition: width 0.15s cubic-bezier(0.2, 0, 0, 1);
+    }
+    body.is-fit-width .page-box {
+      width: min(calc(100% - 24px), 100%) !important;
+      max-width: 100% !important;
+      min-width: 280px;
     }
     .page-box, .page-box * {
       user-select: text;
@@ -1272,22 +1284,33 @@ export class BotoxPreviewPanel {
       }
     }
 
-    function applyScaleToPages() {
+    let zoomAnimTimeout = null;
+
+    function applyScaleToPages(animate = false) {
       const targetWidth = calculatePageWidth();
-      const pages = container.querySelectorAll('.page-box');
-      pages.forEach(p => {
-        p.style.width = targetWidth + 'px';
-      });
+      container.style.setProperty('--page-width', targetWidth + 'px');
 
       if (isFitWidth) {
+        document.body.classList.add('is-fit-width');
         zoomLabel.textContent = 'Fit';
         btnFit.classList.add('active');
       } else {
+        document.body.classList.remove('is-fit-width');
         zoomLabel.textContent = Math.round(currentScale * 100) + '%';
         btnFit.classList.remove('active');
       }
 
-      updatePageMetrics();
+      if (animate) {
+        container.classList.add('animating-zoom');
+        clearTimeout(zoomAnimTimeout);
+        zoomAnimTimeout = setTimeout(() => {
+          container.classList.remove('animating-zoom');
+          updatePageMetrics();
+        }, 160);
+      } else {
+        container.classList.remove('animating-zoom');
+        updatePageMetrics();
+      }
     }
 
     function scrollToElement(el) {
@@ -1519,11 +1542,10 @@ export class BotoxPreviewPanel {
 
     let currentPageIndex = 0;
 
-    function setupPageBox(pageBox, svgContent, i, targetWidth) {
+    function setupPageBox(pageBox, svgContent, i) {
       const isPauseStep = svgContent.includes('data-pause-step="true"') || svgContent.includes('pause-step');
       pageBox.className = isPauseStep ? 'page-box pause-step' : 'page-box';
       pageBox.id = 'page-' + (i + 1);
-      pageBox.style.width = targetWidth + 'px';
 
       const vbMatch = svgContent.match(/viewBox=["']([0-9.]+)[ ]+([0-9.]+)[ ]+([0-9.]+)[ ]+([0-9.]+)["']/);
       if (vbMatch) {
@@ -1624,7 +1646,7 @@ export class BotoxPreviewPanel {
         currentPageIndex = Math.max(0, pages.length - 1);
       }
 
-      const targetWidth = calculatePageWidth();
+      applyScaleToPages(false);
       const prevScrollTop = container.scrollTop;
       const prevScrollHeight = container.scrollHeight;
 
@@ -1644,14 +1666,12 @@ export class BotoxPreviewPanel {
         if (i < existingBoxes.length) {
           const box = existingBoxes[i];
           if (renderedPageSvgs[i] !== pages[i]) {
-            setupPageBox(box, pages[i], i, targetWidth);
+            setupPageBox(box, pages[i], i);
             renderedPageSvgs[i] = pages[i];
-          } else {
-            box.style.width = targetWidth + 'px';
           }
         } else {
           const newBox = document.createElement('div');
-          setupPageBox(newBox, pages[i], i, targetWidth);
+          setupPageBox(newBox, pages[i], i);
           container.appendChild(newBox);
           existingBoxes.push(newBox);
           renderedPageSvgs[i] = pages[i];
@@ -1726,47 +1746,67 @@ export class BotoxPreviewPanel {
       });
     }
 
-    // Ctrl + Wheel / Pinch Zoom
+    // Ctrl + Wheel / Pinch Zoom (smooth continuous zoom without animation delay)
     container.addEventListener('wheel', (e) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         isFitWidth = false;
-        const delta = e.deltaY < 0 ? 0.15 : -0.15;
+        const delta = e.deltaY < 0 ? 0.08 : -0.08;
         currentScale = Math.max(0.35, Math.min(3.5, currentScale + delta));
-        applyScaleToPages();
+        applyScaleToPages(false);
       }
     }, { passive: false });
 
-    // Zoom controls
+    // Zoom controls (buttons animate smoothly)
     document.getElementById('btn-zoom-in').addEventListener('click', () => {
       isFitWidth = false;
       currentScale = Math.min(currentScale + 0.15, 3.5);
-      applyScaleToPages();
+      applyScaleToPages(true);
     });
 
     document.getElementById('btn-zoom-out').addEventListener('click', () => {
       isFitWidth = false;
       currentScale = Math.max(currentScale - 0.15, 0.35);
-      applyScaleToPages();
+      applyScaleToPages(true);
     });
 
     document.getElementById('btn-zoom-reset').addEventListener('click', () => {
       isFitWidth = false;
       currentScale = 1.0;
-      applyScaleToPages();
+      applyScaleToPages(true);
     });
 
     btnFit.addEventListener('click', () => {
       isFitWidth = !isFitWidth;
-      applyScaleToPages();
+      applyScaleToPages(true);
     });
 
+    let resizeRafId = null;
+    let resizeMetricsTimer = null;
+
     window.addEventListener('resize', () => {
-      if (isFitWidth) {
-        applyScaleToPages();
-      } else {
-        updatePageMetrics();
+      const prevScrollTop = container.scrollTop;
+      const prevScrollHeight = container.scrollHeight;
+
+      if (!resizeRafId) {
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = null;
+          if (isFitWidth) {
+            // CSS handles width automatically at 60/120fps; maintain scroll ratio
+            if (prevScrollHeight > 0 && prevScrollTop > 0 && container.scrollHeight > 0) {
+              const ratio = prevScrollTop / prevScrollHeight;
+              container.scrollTop = ratio * container.scrollHeight;
+            }
+          }
+        });
       }
+
+      // Debounce heavy getBoundingClientRect DOM measurements until resizing stops
+      clearTimeout(resizeMetricsTimer);
+      resizeMetricsTimer = setTimeout(() => {
+        updatePageMetrics();
+        updatePageIndicator();
+      }, 100);
     });
 
     // Keyboard shortcuts in webview
@@ -1785,17 +1825,17 @@ export class BotoxPreviewPanel {
         e.preventDefault();
         isFitWidth = false;
         currentScale = Math.min(currentScale + 0.15, 3.5);
-        applyScaleToPages();
+        applyScaleToPages(true);
       } else if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_')) {
         e.preventDefault();
         isFitWidth = false;
         currentScale = Math.max(currentScale - 0.15, 0.35);
-        applyScaleToPages();
+        applyScaleToPages(true);
       } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
         e.preventDefault();
         isFitWidth = false;
         currentScale = 1.0;
-        applyScaleToPages();
+        applyScaleToPages(true);
       }
     });
 
