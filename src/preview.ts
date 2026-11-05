@@ -860,7 +860,7 @@ export class BotoxPreviewPanel {
       overflow-x: auto;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: normal;
       padding: 28px 16px 56px;
       gap: 24px;
       background: var(--canvas-bg);
@@ -868,7 +868,6 @@ export class BotoxPreviewPanel {
     }
     .page-box {
       width: var(--page-width, 820px);
-      max-width: calc(100% - 16px);
       background: var(--page-bg);
       box-shadow: var(--page-shadow);
       border: 1px solid var(--page-border);
@@ -882,13 +881,11 @@ export class BotoxPreviewPanel {
       user-select: text;
       -webkit-user-select: text;
     }
-    #viewer-container.animating-zoom .page-box {
-      transition: width 0.15s cubic-bezier(0.2, 0, 0, 1);
-    }
     body.is-fit-width .page-box {
-      width: min(calc(100% - 24px), 100%) !important;
+      width: 100% !important;
       max-width: 100% !important;
       min-width: 280px;
+      margin: 0 auto;
     }
     .page-box, .page-box * {
       user-select: text;
@@ -1256,9 +1253,14 @@ export class BotoxPreviewPanel {
       errorHud.classList.remove('expanded');
     }
 
+    function calculateEffectiveScale() {
+      const available = container.clientWidth - 32;
+      return Math.max(0.35, Math.min(3.5, available / basePageWidth));
+    }
+
     function calculatePageWidth() {
       if (isFitWidth) {
-        const available = container.clientWidth - 48;
+        const available = container.clientWidth - 32;
         return Math.max(available, 280);
       }
       return Math.round(basePageWidth * currentScale);
@@ -1284,9 +1286,13 @@ export class BotoxPreviewPanel {
       }
     }
 
-    let zoomAnimTimeout = null;
+    function applyScaleToPages(animate = false, focalPoint = null) {
+      const prevScrollTop = container.scrollTop;
+      const prevScrollHeight = container.scrollHeight;
+      const prevClientHeight = container.clientHeight;
+      const prevScrollLeft = container.scrollLeft;
+      const prevScrollWidth = container.scrollWidth;
 
-    function applyScaleToPages(animate = false) {
       const targetWidth = calculatePageWidth();
       container.style.setProperty('--page-width', targetWidth + 'px');
 
@@ -1300,17 +1306,23 @@ export class BotoxPreviewPanel {
         btnFit.classList.remove('active');
       }
 
-      if (animate) {
-        container.classList.add('animating-zoom');
-        clearTimeout(zoomAnimTimeout);
-        zoomAnimTimeout = setTimeout(() => {
-          container.classList.remove('animating-zoom');
-          updatePageMetrics();
-        }, 160);
-      } else {
-        container.classList.remove('animating-zoom');
-        updatePageMetrics();
+      // Preserve focus point
+      if (prevScrollHeight > 0 && container.scrollHeight > 0) {
+        if (focalPoint && focalPoint.y !== undefined) {
+          const ratio = (prevScrollTop + focalPoint.y) / prevScrollHeight;
+          container.scrollTop = ratio * container.scrollHeight - focalPoint.y;
+        } else {
+          const centerRatio = (prevScrollTop + prevClientHeight / 2) / prevScrollHeight;
+          container.scrollTop = centerRatio * container.scrollHeight - prevClientHeight / 2;
+        }
       }
+
+      if (prevScrollWidth > 0 && container.scrollWidth > 0 && focalPoint && focalPoint.x !== undefined) {
+        const xRatio = (prevScrollLeft + focalPoint.x) / prevScrollWidth;
+        container.scrollLeft = xRatio * container.scrollWidth - focalPoint.x;
+      }
+
+      updatePageMetrics();
     }
 
     function scrollToElement(el) {
@@ -1707,10 +1719,13 @@ export class BotoxPreviewPanel {
 
     if (pageInput) {
       pageInput.addEventListener('change', () => {
-        const val = parseInt(pageInput.value, 10);
-        if (isNaN(val)) return;
+        const rawVal = parseInt(pageInput.value, 10);
+        if (isNaN(rawVal)) return;
         const visiblePages = Array.from(container.querySelectorAll('.page-box:not(.pause-step)'));
-        const targetBox = visiblePages[val - 1];
+        if (visiblePages.length === 0) return;
+        const clampedVal = Math.max(1, Math.min(rawVal, visiblePages.length));
+        pageInput.value = clampedVal;
+        const targetBox = visiblePages[clampedVal - 1];
         if (targetBox) {
           const allPages = Array.from(container.querySelectorAll('.page-box'));
           scrollToPage(allPages.indexOf(targetBox));
@@ -1719,6 +1734,7 @@ export class BotoxPreviewPanel {
       pageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           pageInput.dispatchEvent(new Event('change'));
+          pageInput.blur();
         }
       });
     }
@@ -1746,40 +1762,58 @@ export class BotoxPreviewPanel {
       });
     }
 
-    // Ctrl + Wheel / Pinch Zoom (smooth continuous zoom without animation delay)
-    container.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
+    function handleZoomIn() {
+      if (isFitWidth) {
+        currentScale = calculateEffectiveScale();
         isFitWidth = false;
-        const delta = e.deltaY < 0 ? 0.08 : -0.08;
-        currentScale = Math.max(0.35, Math.min(3.5, currentScale + delta));
-        applyScaleToPages(false);
       }
-    }, { passive: false });
-
-    // Zoom controls (buttons animate smoothly)
-    document.getElementById('btn-zoom-in').addEventListener('click', () => {
-      isFitWidth = false;
       currentScale = Math.min(currentScale + 0.15, 3.5);
       applyScaleToPages(true);
-    });
+    }
 
-    document.getElementById('btn-zoom-out').addEventListener('click', () => {
-      isFitWidth = false;
+    function handleZoomOut() {
+      if (isFitWidth) {
+        currentScale = calculateEffectiveScale();
+        isFitWidth = false;
+      }
       currentScale = Math.max(currentScale - 0.15, 0.35);
       applyScaleToPages(true);
-    });
+    }
 
-    document.getElementById('btn-zoom-reset').addEventListener('click', () => {
+    function handleZoomReset() {
       isFitWidth = false;
       currentScale = 1.0;
       applyScaleToPages(true);
-    });
+    }
 
-    btnFit.addEventListener('click', () => {
+    function handleZoomFit() {
       isFitWidth = !isFitWidth;
       applyScaleToPages(true);
-    });
+    }
+
+    // Ctrl + Wheel / Pinch Zoom (smooth focal zoom centered on mouse pointer)
+    container.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (isFitWidth) {
+          currentScale = calculateEffectiveScale();
+          isFitWidth = false;
+        }
+        const delta = e.deltaY < 0 ? 0.08 : -0.08;
+        currentScale = Math.max(0.35, Math.min(3.5, currentScale + delta));
+        const rect = container.getBoundingClientRect();
+        applyScaleToPages(false, {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    }, { passive: false });
+
+    // Zoom controls
+    document.getElementById('btn-zoom-in').addEventListener('click', handleZoomIn);
+    document.getElementById('btn-zoom-out').addEventListener('click', handleZoomOut);
+    document.getElementById('btn-zoom-reset').addEventListener('click', handleZoomReset);
+    btnFit.addEventListener('click', handleZoomFit);
 
     let resizeRafId = null;
     let resizeMetricsTimer = null;
@@ -1823,19 +1857,13 @@ export class BotoxPreviewPanel {
 
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
-        isFitWidth = false;
-        currentScale = Math.min(currentScale + 0.15, 3.5);
-        applyScaleToPages(true);
+        handleZoomIn();
       } else if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_')) {
         e.preventDefault();
-        isFitWidth = false;
-        currentScale = Math.max(currentScale - 0.15, 0.35);
-        applyScaleToPages(true);
+        handleZoomOut();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
         e.preventDefault();
-        isFitWidth = false;
-        currentScale = 1.0;
-        applyScaleToPages(true);
+        handleZoomReset();
       }
     });
 

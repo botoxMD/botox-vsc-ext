@@ -46,50 +46,28 @@ export function cleanCompilerError(raw: string, fallbackFileName?: string): stri
     return clean.trim();
 }
 
+import {
+    resolveBotoxBinary as backendResolveBinary,
+    hasBotoxBinary as backendHasBinary,
+    ensureBotoxBinary as backendEnsureBinary,
+    BOTOX_CLI_REPO_URL
+} from './backend';
+
+export { BOTOX_CLI_REPO_URL };
+
 export function resolveBotoxBinary(): string {
-    const isWin = process.platform === 'win32';
-    const binName = isWin ? 'botox.exe' : 'botox';
-
-    // 1. User-configured executable path in VS Code settings
-    const config = vscode.workspace.getConfiguration('botox');
-    const customPath = config.get<string>('executablePath');
-    if (customPath && customPath !== 'botox' && fs.existsSync(customPath)) {
-        return customPath;
-    }
-
-    // 2. Standard user local binary path (~/.local/bin/botox)
-    const homeLocalBin = path.join(os.homedir(), '.local', 'bin', binName);
-    if (fs.existsSync(homeLocalBin)) {
-        return homeLocalBin;
-    }
-
-    // 3. Cargo binary path (~/.cargo/bin/botox)
-    const cargoBin = path.join(os.homedir(), '.cargo', 'bin', binName);
-    if (fs.existsSync(cargoBin)) {
-        return cargoBin;
-    }
-
-    // 4. System PATH or default binary name
-    return binName;
+    return backendResolveBinary(extensionContext);
 }
 
 export function hasBotoxBinary(): boolean {
-    const bin = resolveBotoxBinary();
-    if (path.isAbsolute(bin)) {
-        return fs.existsSync(bin);
-    }
-    try {
-        const checkCmd = process.platform === 'win32' ? 'where' : 'which';
-        const res = child_process.spawnSync(checkCmd, [bin], { encoding: 'utf-8' });
-        return res.status === 0 && res.stdout.trim().length > 0;
-    } catch {
-        return false;
-    }
+    return backendHasBinary(extensionContext);
 }
 
-export const BOTOX_CLI_REPO_URL = 'https://github.com/botoxMD/botox-cli';
-
 export async function promptInstallBotoxBinary(): Promise<void> {
+    if (extensionContext) {
+        await backendEnsureBinary(extensionContext, { forceDownload: true });
+        return;
+    }
     const installAction = 'Install Botox (GitHub)';
     const settingsAction = 'Configure Path';
     const choice = await vscode.window.showErrorMessage(
@@ -106,13 +84,7 @@ export async function promptInstallBotoxBinary(): Promise<void> {
 }
 
 export async function ensureBotoxBinary(): Promise<string> {
-    const current = resolveBotoxBinary();
-    if (hasBotoxBinary()) {
-        return current;
-    }
-
-    await promptInstallBotoxBinary();
-    throw new Error(`Botox CLI binary is not installed. Please install it from ${BOTOX_CLI_REPO_URL}`);
+    return backendEnsureBinary(extensionContext);
 }
 
 const activePreviewProcs = new Map<string, child_process.ChildProcess>();
@@ -234,9 +206,13 @@ class BotoxDaemonClient {
             const timer = setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
                     this.pendingRequests.delete(id);
+                    if (this.proc) {
+                        try { this.proc.kill('SIGTERM'); } catch {}
+                        this.proc = null;
+                    }
                     resolve(null);
                 }
-            }, 6000);
+            }, 10000);
 
             this.pendingRequests.set(id, (resp: any) => {
                 clearTimeout(timer);

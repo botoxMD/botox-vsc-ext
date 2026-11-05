@@ -7,25 +7,13 @@
 
 Live vector preview and typesetting for Markdown documents and slide decks using [Botox](https://github.com/botoxMD/botox-cli).
 
-## Prerequisites
+## Zero-Friction Setup (Automatic Backend Installation)
 
-The extension uses the standalone **[Botox CLI](https://github.com/botoxMD/botox-cli)** binary to compile documents. 
+**No manual prerequisites required.** When you install the extension, it automatically downloads, verifies, and configures the matching pre-built [Botox CLI](https://github.com/botoxMD/botox-cli) binary for your operating system and architecture (`x86_64` and `aarch64` for Linux, macOS, and Windows).
 
-Before using the extension, install the `botox` binary using one of the methods from the [Botox CLI repository](https://github.com/botoxMD/botox-cli):
-
-- **Cargo / Source**:
-  ```bash
-  cargo install --git https://github.com/botoxMD/botox-cli.git
-  ```
-  Or clone and build:
-  ```bash
-  git clone https://github.com/botoxMD/botox-cli.git
-  cd botox-cli && cargo build --release
-  cp target/release/botox ~/.local/bin/
-  ```
-- **Prebuilt Binary**: Download `botox` from the [GitHub Releases](https://github.com/botoxMD/botox-cli/releases) page and place it in your `PATH` or `~/.local/bin/`.
-
-*(If `botox` is installed in a custom path, configure `botox.executablePath` in your VS Code Settings).*
+- **Automatic Updates**: When the extension updates or when a newer compiler backend is released, it automatically keeps your compiler synchronized.
+- **Manual Control**: You can manually check or reinstall the compiler backend anytime via `Ctrl+Shift+P` -> `Botox: Download / Update Compiler Backend`.
+- **Custom Executables**: If you prefer building from source or using a custom build, set `botox.executablePath` in your VS Code Settings.
 
 ## Features
 
@@ -65,17 +53,20 @@ code --install-extension botox-0.14.5.vsix
 | Command | Title | Shortcut |
 | :--- | :--- | :--- |
 | `botox.openPreview` | Botox: Open Live PDF Preview | `Ctrl+K V` / `Cmd+K V` |
-| `botox.compilePdf` | Botox: Compile to PDF | - |
+| `botox.compilePdf` | Botox: Compile to PDF | `Ctrl+Alt+B` / `Cmd+Alt+B` |
+| `botox.exportMarkdown` | Botox: Export to Normal Markdown | - |
+| `botox.downloadBackend` | Botox: Download / Update Compiler Backend | - |
 | `botox.initDocument` | Botox: Initialize New Document | - |
 | `botox.initSlides` | Botox: Initialize Slide Deck | - |
 | `botox.toggleSyncScroll` | Botox: Toggle Follow Cursor / Sync Scroll | - |
-| `botox.setup` | Botox: Setup Defaults (Wizard) | - |
+| `botox.setup` | Botox: Configure Defaults (Setup Wizard) | - |
 
 ## Settings
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `botox.executablePath` | string | `botox` | Path to the `botox` CLI binary (checks custom path, `~/.local/bin/botox`, or `PATH`) |
+| `botox.executablePath` | string | `botox` | Path to the `botox` CLI binary (checks custom path, extension storage, `~/.local/bin`, or `PATH`) |
+| `botox.autoDownloadBackend` | boolean | `true` | Automatically download and manage the pre-built compiler backend when missing or outdated |
 | `botox.autoCompileOnSave` | boolean | `true` | Automatically compile and update the preview whenever the file is saved |
 | `botox.autoCompileOnChange` | boolean | `true` | Update the live preview on text changes before saving |
 | `botox.debounceDelay` | number | `120` | Delay in milliseconds to wait after the last keystroke before recompiling |

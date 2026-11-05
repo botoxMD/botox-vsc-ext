@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { BotoxPreviewPanel, BotoxPreviewSerializer } from './preview';
 import { compileDocument, runInit, setExtensionContext, disposeDaemonClient } from './compiler';
 import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup, resetSetupState } from './setup';
+import { checkAndPromptBackendUpdate, downloadAndInstallBackend } from './backend';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
@@ -278,6 +279,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Check first-run setup interaction
     checkFirstRunSetup(context);
 
+    // Check for compiler backend updates in the background
+    checkAndPromptBackendUpdate(context);
+
     // Register Webview serializer to restore preview panels across reloads and sessions
     context.subscriptions.push(
         vscode.window.registerWebviewPanelSerializer('botoxPreview', new BotoxPreviewSerializer())
@@ -326,31 +330,13 @@ export function activate(context: vscode.ExtensionContext) {
             const defaultFilename = `${baseStem}.${defaultExt}`;
             const defaultOutputPath = path.join(defaultDir, defaultFilename);
 
-            const fileExistedBefore = fs.existsSync(defaultOutputPath);
-            if (!fileExistedBefore) {
-                try {
-                    fs.writeFileSync(defaultOutputPath, '');
-                } catch {}
-            }
-
-            let saveUri: vscode.Uri | undefined;
-            try {
-                saveUri = await vscode.window.showSaveDialog({
-                    defaultUri: vscode.Uri.file(defaultOutputPath),
-                    filters: isSlides
-                        ? { 'HTML Presentation Slides': ['html', 'htm'], 'PDF Document': ['pdf'] }
-                        : { 'PDF Document': ['pdf'], 'HTML Document': ['html', 'htm'] },
-                    title: isSlides ? 'Export Presentation Slides with Botox' : 'Export PDF with Botox'
-                });
-            } finally {
-                if (!fileExistedBefore && fs.existsSync(defaultOutputPath)) {
-                    if (!saveUri || saveUri.fsPath !== defaultOutputPath) {
-                        try {
-                            fs.unlinkSync(defaultOutputPath);
-                        } catch {}
-                    }
-                }
-            }
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(defaultOutputPath),
+                filters: isSlides
+                    ? { 'HTML Presentation Slides': ['html', 'htm'], 'PDF Document': ['pdf'] }
+                    : { 'PDF Document': ['pdf'], 'HTML Document': ['html', 'htm'] },
+                title: isSlides ? 'Export Presentation Slides with Botox' : 'Export PDF with Botox'
+            });
 
             if (!saveUri) {
                 return;
@@ -414,29 +400,11 @@ export function activate(context: vscode.ExtensionContext) {
             const defaultDir = path.dirname(inputPath);
             const defaultOutputPath = path.join(defaultDir, defaultFilename);
 
-            const fileExistedBefore = fs.existsSync(defaultOutputPath);
-            if (!fileExistedBefore) {
-                try {
-                    fs.writeFileSync(defaultOutputPath, '');
-                } catch {}
-            }
-
-            let saveUri: vscode.Uri | undefined;
-            try {
-                saveUri = await vscode.window.showSaveDialog({
-                    defaultUri: vscode.Uri.file(defaultOutputPath),
-                    filters: { 'Markdown Document': ['md', 'markdown'] },
-                    title: 'Export to Normal Markdown with Botox'
-                });
-            } finally {
-                if (!fileExistedBefore && fs.existsSync(defaultOutputPath)) {
-                    if (!saveUri || saveUri.fsPath !== defaultOutputPath) {
-                        try {
-                            fs.unlinkSync(defaultOutputPath);
-                        } catch {}
-                    }
-                }
-            }
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(defaultOutputPath),
+                filters: { 'Markdown Document': ['md', 'markdown'] },
+                title: 'Export to Normal Markdown with Botox'
+            });
 
             if (!saveUri) {
                 return;
@@ -559,6 +527,12 @@ export function activate(context: vscode.ExtensionContext) {
             await resetSetupState(context);
             vscode.window.showInformationMessage('Botox: Setup state has been reset. You will be prompted to set up on next start.');
         }
+    );
+
+    // 9. Download / Update Compiler Backend
+    const downloadBackendCmd = vscode.commands.registerCommand(
+        'botox.downloadBackend',
+        () => downloadAndInstallBackend(context)
     );
 
     // Watch on save
@@ -751,6 +725,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         setupCmd,
         setupTerminalCmd,
         resetSetupCmd,
+        downloadBackendCmd,
         onSaveDisposable,
         onChangeDisposable,
         onSelectionChangeDisposable,

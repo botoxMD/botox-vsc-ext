@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,8 @@
     "onCommand:botox.initSlides",
     "onCommand:botox.setup",
     "onCommand:botox.setupTerminal",
-    "onCommand:botox.resetSetup"
+    "onCommand:botox.resetSetup",
+    "onCommand:botox.downloadBackend"
   ],
   "contributes": {
     "languages": [
@@ -65,6 +66,12 @@
         "command": "botox.resetSetup",
         "title": "Reset Setup Status (Force Setup on Next Run)",
         "category": "Botox"
+      },
+      {
+        "command": "botox.downloadBackend",
+        "title": "Download / Update Compiler Backend",
+        "category": "Botox",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "botox.setupTerminal",
@@ -174,7 +181,12 @@
         "botox.executablePath": {
           "type": "string",
           "default": "botox",
-          "description": "Path to the botox CLI executable (defaults to 'botox' on PATH, or ~/.local/bin/botox)."
+          "description": "Path to the botox CLI executable (defaults to 'botox' on PATH, ~/.local/bin/botox, or extension storage)."
+        },
+        "botox.autoDownloadBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically download and manage the pre-built Botox compiler backend when missing or outdated."
         },
         "botox.krokiUrl": {
           "type": "string",
@@ -251,6 +263,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node scripts/test.js",
     "package": "vsce package"
   },
   "devDependencies": {
