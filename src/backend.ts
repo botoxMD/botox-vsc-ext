@@ -10,7 +10,7 @@ import * as http from 'http';
  * Pinned target version of the Botox compiler backend.
  * Synchronized with the accompanying CLI release.
  */
-export const DEFAULT_BOTOX_VERSION = '0.3.2';
+export const DEFAULT_BOTOX_VERSION = '0.3.3';
 
 export const BOTOX_CLI_REPO = 'botoxMD/botox-cli';
 export const BOTOX_CLI_REPO_URL = `https://github.com/${BOTOX_CLI_REPO}`;
