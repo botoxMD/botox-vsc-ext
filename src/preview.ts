@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { abortActivePreview, compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
-import { reportCompilationSuccess, reportCompilationFailure } from './extension';
+import { reportCompilationSuccess, reportCompilationFailure, updateStatusBarLayout } from './extension';
+import {
+    runBotoxInspect,
+    runBotoxProbeAtPoint,
+    applyLayoutDiagnostics,
+    jumpToEditorLine,
+    InspectReport
+} from './inspector';
 
 export class BotoxPreviewPanel {
     public static currentPanels: Map<string, BotoxPreviewPanel> = new Map();
@@ -16,6 +23,11 @@ export class BotoxPreviewPanel {
     private _lastNumPages: number = 0;
     private _activeDocumentTheme: string = 'academic';
     private _isSlides: boolean = false;
+    private _inspectTimer: NodeJS.Timeout | undefined;
+    private _inspectSeq: number = 0;
+    private _showLayoutOverlay: boolean = false;
+    private _latestReport: InspectReport | null = null;
+    private _lastLiveContent?: string;
 
     public static get(documentUri: vscode.Uri): BotoxPreviewPanel | undefined {
         const direct = BotoxPreviewPanel.currentPanels.get(documentUri.toString());
@@ -79,11 +91,12 @@ export class BotoxPreviewPanel {
     private constructor(panel: vscode.WebviewPanel, documentUri: vscode.Uri) {
         this._panel = panel;
         this._documentUri = documentUri;
+        this._showLayoutOverlay = vscode.workspace.getConfiguration('botox').get<boolean>('showLayoutOverlay', false);
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
         this._panel.webview.onDidReceiveMessage(
-            message => {
+            async message => {
                 switch (message.command) {
                     case 'refresh':
                         this.update();
@@ -116,6 +129,42 @@ export class BotoxPreviewPanel {
                         config.update('syncScroll', !current, vscode.ConfigurationTarget.Global);
                         return;
                     }
+                    case 'toggleLayoutOverlay':
+                        this.toggleLayoutOverlay();
+                        return;
+                    case 'jumpToLine':
+                        if (typeof message.line === 'number' && message.line > 0) {
+                            await jumpToEditorLine(this._documentUri, message.line);
+                        }
+                        return;
+                    case 'probeClick':
+                        if (
+                            typeof message.page === 'number' &&
+                            typeof message.xPt === 'number' &&
+                            typeof message.yPt === 'number'
+                        ) {
+                            const doc = vscode.workspace.textDocuments.find(
+                                d => d.uri.toString() === this._documentUri.toString() || d.uri.fsPath === this._documentUri.fsPath
+                            );
+                            const live = doc && doc.isDirty ? doc.getText() : undefined;
+                            const srcLine = await runBotoxProbeAtPoint(
+                                this._documentUri.fsPath,
+                                message.page,
+                                message.xPt,
+                                message.yPt,
+                                this._activeDocumentTheme,
+                                live
+                            );
+                            if (srcLine) {
+                                await jumpToEditorLine(this._documentUri, srcLine);
+                            } else {
+                                vscode.window.setStatusBarMessage(
+                                    `Botox: No source line mapped at page ${message.page} (${Math.round(message.xPt)}, ${Math.round(message.yPt)}pt)`,
+                                    2500
+                                );
+                            }
+                        }
+                        return;
                 }
             },
             null,
@@ -123,6 +172,68 @@ export class BotoxPreviewPanel {
         );
 
         this.update();
+    }
+
+    public toggleLayoutOverlay() {
+        this._showLayoutOverlay = !this._showLayoutOverlay;
+        this._panel.webview.postMessage({
+            type: 'setLayoutOverlay',
+            enabled: this._showLayoutOverlay
+        });
+        if (this._showLayoutOverlay && !this._latestReport && !this._isSlides) {
+            this._scheduleLayoutInspect(this._lastLiveContent, true);
+        }
+    }
+
+    private _scheduleLayoutInspect(liveContent?: string, immediate = false) {
+        if (this._inspectTimer) {
+            clearTimeout(this._inspectTimer);
+            this._inspectTimer = undefined;
+        }
+        if (this._isSlides) {
+            this._latestReport = null;
+            applyLayoutDiagnostics(this._documentUri, null);
+            updateStatusBarLayout(this._documentUri, null);
+            this._panel.webview.postMessage({ type: 'layoutReport', report: null });
+            return;
+        }
+
+        const config = vscode.workspace.getConfiguration('botox');
+        const diagsEnabled = config.get<boolean>('layoutDiagnostics', true);
+        if (!diagsEnabled && !this._showLayoutOverlay) {
+            return;
+        }
+
+        const seq = ++this._inspectSeq;
+        const run = async () => {
+            const doc = vscode.workspace.textDocuments.find(
+                d => d.uri.toString() === this._documentUri.toString() || d.uri.fsPath === this._documentUri.fsPath
+            );
+            const effectiveLive = doc && doc.isDirty ? (liveContent ?? doc.getText()) : undefined;
+            const report = await runBotoxInspect(this._documentUri.fsPath, {
+                theme: this._activeDocumentTheme,
+                liveContent: effectiveLive
+            });
+            if (seq !== this._inspectSeq) {
+                return;
+            }
+            this._latestReport = report;
+            applyLayoutDiagnostics(this._documentUri, report);
+            updateStatusBarLayout(this._documentUri, report);
+            this._panel.webview.postMessage({
+                type: 'layoutReport',
+                report
+            });
+        };
+
+        if (immediate) {
+            void run();
+        } else {
+            this._inspectTimer = setTimeout(() => {
+                this._inspectTimer = undefined;
+                void run();
+            }, 350);
+        }
     }
 
     public scrollToLine(
@@ -272,6 +383,7 @@ export class BotoxPreviewPanel {
                 }
                 this._lastHeadings = result.headings || [];
                 this._lastNumPages = result.numPages || result.pages.length;
+                this._lastLiveContent = content;
                 reportCompilationSuccess(this._documentUri, result.durationMs);
                 this._panel.title = `Preview: ${path.basename(this._documentUri.fsPath)}`;
                 if (!this._htmlInitialized) {
@@ -287,6 +399,7 @@ export class BotoxPreviewPanel {
                         activeTheme: this._activeDocumentTheme
                     });
                 }
+                this._scheduleLayoutInspect(content);
             } else if (result.error && result.error.includes('Aborted:')) {
                 // Aborted because a newer compile was triggered; suppress error
                 return;
@@ -327,6 +440,10 @@ export class BotoxPreviewPanel {
     }
 
     public dispose() {
+        if (this._inspectTimer) {
+            clearTimeout(this._inspectTimer);
+            this._inspectTimer = undefined;
+        }
         BotoxPreviewPanel.currentPanels.delete(this._documentUri.toString());
         this._panel.dispose();
 
@@ -345,6 +462,7 @@ export class BotoxPreviewPanel {
         const headingsJson = JSON.stringify(initialHeadings);
         const initialErrorJson = JSON.stringify(initialError || null);
         const initialSync = vscode.workspace.getConfiguration('botox').get<boolean>('syncScroll', true);
+        const initialOverlay = this._showLayoutOverlay;
         const activeTheme = this._activeDocumentTheme;
 
         return `<!DOCTYPE html>
@@ -920,6 +1038,109 @@ export class BotoxPreviewPanel {
     .page-box.pause-step {
       display: none !important;
     }
+
+    /* Visual Layout Inspector Overlay */
+    .inspect-count-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 4px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      background: rgba(56, 189, 248, 0.2);
+      color: #38bdf8;
+    }
+    .inspect-count-pill.warn {
+      background: rgba(245, 158, 11, 0.22);
+      color: #fbbf24;
+    }
+    .inspect-count-pill.error {
+      background: rgba(239, 68, 68, 0.25);
+      color: #f87171;
+    }
+    .inspect-count-pill.ok {
+      background: rgba(34, 197, 94, 0.22);
+      color: #4ade80;
+    }
+    .page-fill-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 20;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      background: rgba(15, 23, 42, 0.82);
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+      backdrop-filter: blur(4px);
+    }
+    .page-fill-badge.spill {
+      background: rgba(127, 29, 29, 0.9);
+      color: #fecaca;
+      border-color: rgba(239, 68, 68, 0.6);
+    }
+    .page-box svg.botox-inspect-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100% !important;
+      height: 100% !important;
+      pointer-events: none;
+      z-index: 15;
+      filter: none !important;
+    }
+    .botox-issue-rect {
+      pointer-events: all;
+      cursor: pointer;
+      transition: fill-opacity 0.15s ease, stroke-width 0.15s ease;
+    }
+    .botox-issue-rect.sev-error {
+      fill: #ef4444;
+      fill-opacity: 0.16;
+      stroke: #ef4444;
+      stroke-width: 1.4;
+    }
+    .botox-issue-rect.sev-warn {
+      fill: #f59e0b;
+      fill-opacity: 0.16;
+      stroke: #f59e0b;
+      stroke-width: 1.3;
+    }
+    .botox-issue-rect.sev-hint {
+      fill: #38bdf8;
+      fill-opacity: 0.12;
+      stroke: #38bdf8;
+      stroke-width: 1.0;
+      stroke-dasharray: 3 2;
+    }
+    .botox-issue-rect:hover {
+      fill-opacity: 0.32;
+      stroke-width: 2.0;
+    }
+    @keyframes botox-ripple {
+      0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0.9; }
+      100% { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
+    }
+    .botox-probe-ripple {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid #38bdf8;
+      background: rgba(56, 189, 248, 0.25);
+      pointer-events: none;
+      z-index: 25;
+      animation: botox-ripple 0.45s ease-out forwards;
+    }
   </style>
 </head>
 <body>
@@ -942,6 +1163,11 @@ export class BotoxPreviewPanel {
         <input type="checkbox" id="chk-follow-cursor" ${initialSync ? 'checked' : ''} />
         <span>Follow cursor</span>
       </label>
+      <button id="btn-toggle-inspect" class="tool-btn ${initialOverlay ? 'active' : ''}" title="Toggle Visual Layout Inspector Overlay (bounding boxes & page fill % — Ctrl+Click any page to jump to Markdown source)">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
+        <span>Inspect</span>
+        <span id="inspect-count-pill" class="inspect-count-pill" style="display: none;"></span>
+      </button>
     </div>
     <div class="tool-group">
       <button id="btn-error-badge" class="tool-btn" style="display: none; color: #fca5a5; background: #7f1d1d; border-color: #ef4444;" title="Toggle Error Details">
@@ -1010,6 +1236,11 @@ export class BotoxPreviewPanel {
     const chkFollowCursor = document.getElementById('chk-follow-cursor');
     const followCursorLabel = document.getElementById('follow-cursor-label');
     const themeSelect = document.getElementById('theme-select');
+    const btnToggleInspect = document.getElementById('btn-toggle-inspect');
+    const inspectCountPill = document.getElementById('inspect-count-pill');
+
+    let showLayoutOverlay = ${initialOverlay ? 'true' : 'false'};
+    let latestLayoutReport = null;
 
     const slideThemes = [
       { id: 'default', label: 'Default (Clean Light)' },
@@ -1693,6 +1924,7 @@ export class BotoxPreviewPanel {
 
       updatePageMetrics();
       updatePageIndicator();
+      renderLayoutOverlay();
 
       // Preserve relative reading position if total height shifted
       if (prevScrollHeight > 0 && prevScrollTop > 0 && Math.abs(container.scrollHeight - prevScrollHeight) > 10) {
@@ -1700,6 +1932,156 @@ export class BotoxPreviewPanel {
         container.scrollTop = scrollRatio * container.scrollHeight;
       }
     }
+
+    function updateInspectButtonUI() {
+      if (btnToggleInspect) {
+        btnToggleInspect.classList.toggle('active', showLayoutOverlay);
+      }
+      if (!inspectCountPill) return;
+      if (!latestLayoutReport || currentIsSlides) {
+        inspectCountPill.style.display = 'none';
+        return;
+      }
+      const c = latestLayoutReport.issue_counts || { error: 0, warn: 0, hint: 0, total: 0 };
+      inspectCountPill.style.display = 'inline-flex';
+      inspectCountPill.className = 'inspect-count-pill';
+      if (c.error > 0) {
+        inspectCountPill.classList.add('error');
+        inspectCountPill.textContent = String(c.error + c.warn);
+      } else if (c.warn > 0) {
+        inspectCountPill.classList.add('warn');
+        inspectCountPill.textContent = String(c.warn);
+      } else if (c.hint > 0) {
+        inspectCountPill.textContent = String(c.hint);
+      } else {
+        inspectCountPill.classList.add('ok');
+        inspectCountPill.textContent = '✓';
+      }
+    }
+
+    function renderLayoutOverlay() {
+      updateInspectButtonUI();
+      const boxes = container.querySelectorAll('.page-box');
+      boxes.forEach((box) => {
+        box.querySelectorAll('.page-fill-badge, svg.botox-inspect-overlay').forEach((el) => el.remove());
+      });
+
+      if (!showLayoutOverlay || !latestLayoutReport || currentIsSlides) {
+        return;
+      }
+
+      const pagesByNum = new Map();
+      (latestLayoutReport.pages || []).forEach((p) => pagesByNum.set(p.page, p));
+
+      const issuesByPage = new Map();
+      (latestLayoutReport.issues || []).forEach((iss) => {
+        if (!issuesByPage.has(iss.page)) issuesByPage.set(iss.page, []);
+        issuesByPage.get(iss.page).push(iss);
+      });
+
+      const svgNS = 'http://www.w3.org/2000/svg';
+      boxes.forEach((box, idx) => {
+        const pageNum = idx + 1;
+        const pSummary = pagesByNum.get(pageNum);
+        const pageIssues = issuesByPage.get(pageNum) || [];
+
+        if (pSummary) {
+          const badge = document.createElement('div');
+          const hasSpill = pageIssues.some((i) => i.code === 'PAGE_SPILLOVER');
+          badge.className = hasSpill ? 'page-fill-badge spill' : 'page-fill-badge';
+          const fillPct = Math.round(pSummary.fill_pct);
+          badge.textContent = 'P' + pageNum + ' · ' + fillPct + '%' + (hasSpill ? ' spill' : '');
+          box.appendChild(badge);
+        }
+
+        if (pageIssues.length > 0 && pSummary && pSummary.width_pt > 0 && pSummary.height_pt > 0) {
+          const overlay = document.createElementNS(svgNS, 'svg');
+          overlay.setAttribute('class', 'botox-inspect-overlay');
+          overlay.setAttribute('viewBox', '0 0 ' + pSummary.width_pt + ' ' + pSummary.height_pt);
+          overlay.setAttribute('preserveAspectRatio', 'none');
+
+          for (const iss of pageIssues) {
+            if (!Array.isArray(iss.bbox_pt) || iss.bbox_pt.length < 4) continue;
+            const [bx, by, bw, bh] = iss.bbox_pt;
+            const w = Math.max(4, bw);
+            const h = Math.max(4, bh);
+
+            const rect = document.createElementNS(svgNS, 'rect');
+            const sevClass = iss.severity === 'error' ? 'sev-error' : iss.severity === 'warn' ? 'sev-warn' : 'sev-hint';
+            rect.setAttribute('class', 'botox-issue-rect ' + sevClass);
+            rect.setAttribute('x', String(Math.max(0, bx - 2)));
+            rect.setAttribute('y', String(Math.max(0, by - 2)));
+            rect.setAttribute('width', String(w + 4));
+            rect.setAttribute('height', String(h + 4));
+            rect.setAttribute('rx', '2');
+
+            const titleEl = document.createElementNS(svgNS, 'title');
+            const lineInfo = iss.src_line ? ' (md:' + iss.src_line + ' — click to jump)' : '';
+            titleEl.textContent = '[' + iss.code + ']' + lineInfo + String.fromCharCode(10) + (iss.suggestion || '');
+            rect.appendChild(titleEl);
+
+            if (iss.src_line && iss.src_line > 0) {
+              rect.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                vscode.postMessage({ command: 'jumpToLine', line: iss.src_line });
+              });
+            }
+            overlay.appendChild(rect);
+          }
+
+          box.appendChild(overlay);
+        }
+      });
+    }
+
+    if (btnToggleInspect) {
+      btnToggleInspect.addEventListener('click', () => {
+        vscode.postMessage({ command: 'toggleLayoutOverlay' });
+      });
+    }
+
+    // Ctrl+Click / Cmd+Click anywhere on a rendered PDF page -> probe exact Markdown source line
+    container.addEventListener('click', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || currentIsSlides) return;
+      if (e.target && e.target.closest && e.target.closest('.botox-issue-rect')) return;
+      const pageBox = e.target && e.target.closest ? e.target.closest('.page-box') : null;
+      if (!pageBox) return;
+      const contentSvg = pageBox.querySelector('svg:not(.botox-inspect-overlay)');
+      if (!contentSvg) return;
+
+      const vbAttr = contentSvg.getAttribute('viewBox');
+      if (!vbAttr) return;
+      const parts = vbAttr.trim().split(/[\\s,]+/).map(Number);
+      if (parts.length !== 4 || parts.some(isNaN) || parts[2] <= 0 || parts[3] <= 0) return;
+
+      const rect = contentSvg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const relX = (e.clientX - rect.left) / rect.width;
+      const relY = (e.clientY - rect.top) / rect.height;
+      const xPt = parts[0] + relX * parts[2];
+      const yPt = parts[1] + relY * parts[3];
+
+      const idMatch = (pageBox.id || '').match(/^page-(\\d+)$/);
+      const pageNum = idMatch ? parseInt(idMatch[1], 10) : 1;
+
+      // Subtle visual ripple at click position
+      const boxRect = pageBox.getBoundingClientRect();
+      const ripple = document.createElement('div');
+      ripple.className = 'botox-probe-ripple';
+      ripple.style.left = (e.clientX - boxRect.left) + 'px';
+      ripple.style.top = (e.clientY - boxRect.top) + 'px';
+      pageBox.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 500);
+
+      e.preventDefault();
+      vscode.postMessage({
+        command: 'probeClick',
+        page: pageNum,
+        xPt,
+        yPt
+      });
+    });
 
     container.addEventListener('scroll', () => {
       if (cachedPageMetrics.length === 0) return;
@@ -1907,6 +2289,12 @@ export class BotoxPreviewPanel {
       } else if (message.type === 'setSyncScroll') {
         syncScrollEnabled = Boolean(message.enabled);
         updateSyncButtonUI();
+      } else if (message.type === 'setLayoutOverlay') {
+        showLayoutOverlay = Boolean(message.enabled);
+        renderLayoutOverlay();
+      } else if (message.type === 'layoutReport') {
+        latestLayoutReport = message.report || null;
+        renderLayoutOverlay();
       } else if (message.type === 'error') {
         showError(message.message);
       } else if (message.type === 'status') {

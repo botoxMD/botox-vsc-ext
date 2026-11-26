@@ -2,7 +2,7 @@
   "name": "botox",
   "displayName": "Botox - Markdown Preview & Typesetting",
   "description": "Live preview and publication-grade LaTeX typesetting for Markdown documents and slide decks using Botox.",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "publisher": "botoxMD",
   "license": "MIT",
   "repository": {
@@ -43,7 +43,11 @@
     "onCommand:botox.setup",
     "onCommand:botox.setupTerminal",
     "onCommand:botox.resetSetup",
-    "onCommand:botox.downloadBackend"
+    "onCommand:botox.downloadBackend",
+    "onCommand:botox.newFromTemplate",
+    "onCommand:botox.insertHeaderTemplate",
+    "onCommand:botox.toggleLayoutOverlay",
+    "onCommand:botox.layoutMenu"
   ],
   "contributes": {
     "languages": [
@@ -111,6 +115,30 @@
         "command": "botox.toggleSyncScroll",
         "title": "Toggle Follow Cursor / Sync Scroll",
         "category": "Botox"
+      },
+      {
+        "command": "botox.newFromTemplate",
+        "title": "New Document from Template...",
+        "category": "Botox",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "botox.insertHeaderTemplate",
+        "title": "Insert Header Template",
+        "category": "Botox",
+        "icon": "$(symbol-snippet)"
+      },
+      {
+        "command": "botox.toggleLayoutOverlay",
+        "title": "Toggle Visual Layout Inspector Overlay",
+        "category": "Botox",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "botox.layoutMenu",
+        "title": "Layout & Templates Menu",
+        "category": "Botox",
+        "icon": "$(dashboard)"
       }
     ],
     "menus": {
@@ -222,6 +250,16 @@
           "type": "boolean",
           "default": true,
           "description": "Display compilation status and quick-preview toggle in the VS Code status bar."
+        },
+        "botox.layoutDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run live layout diagnostics (widows, orphan headings, split code blocks, overflows) in the Problems panel via botox inspect."
+        },
+        "botox.showLayoutOverlay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show visual layout issue bounding boxes and per-page fill percentage badges in the live preview by default."
         }
       }
     },

@@ -5,6 +5,16 @@ import { BotoxPreviewPanel, BotoxPreviewSerializer } from './preview';
 import { compileDocument, runInit, setExtensionContext, disposeDaemonClient } from './compiler';
 import { runSetupWizard, runSetupInTerminal, checkFirstRunSetup, resetSetupState } from './setup';
 import { checkAndPromptBackendUpdate, downloadAndInstallBackend } from './backend';
+import {
+    layoutDiagnostics,
+    BotoxLayoutCodeActionProvider,
+    runNewFromTemplateCommand,
+    runInsertHeaderTemplateCommand,
+    formatLayoutStatusText,
+    getLatestInspectReport,
+    applyLayoutDiagnostics,
+    InspectReport
+} from './inspector';
 
 let debounceTimeout: NodeJS.Timeout | undefined;
 export const botoxDiagnostics = vscode.languages.createDiagnosticCollection('botox');
@@ -40,15 +50,53 @@ export function updateStatusBar(durationMs?: number, isError?: boolean, errorMsg
         statusBarItem.text = `$(error) ${errorCategory || 'Botox Error'}`;
         statusBarItem.tooltip = errorMsg || 'Botox compilation error';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-    } else if (durationMs !== undefined) {
-        statusBarItem.text = `$(book) Botox: ${durationMs}ms`;
-        statusBarItem.tooltip = `Last typeset in ${durationMs}ms (Click to open preview)`;
-        statusBarItem.backgroundColor = undefined;
     } else {
-        statusBarItem.text = '$(book) Botox';
-        statusBarItem.tooltip = 'Click to open Botox live preview';
-        statusBarItem.backgroundColor = undefined;
+        const activeUri = isMd ? editor!.document.uri : undefined;
+        const cachedReport = activeUri ? getLatestInspectReport(activeUri) : undefined;
+        if (cachedReport) {
+            const formatted = formatLayoutStatusText(cachedReport);
+            statusBarItem.text = formatted.text;
+            statusBarItem.tooltip = durationMs !== undefined
+                ? `${formatted.tooltip}\nLast typeset in ${durationMs}ms`
+                : formatted.tooltip;
+            statusBarItem.backgroundColor = formatted.isWarning
+                ? new vscode.ThemeColor('statusBarItem.warningBackground')
+                : undefined;
+        } else if (durationMs !== undefined) {
+            statusBarItem.text = `$(book) Botox: ${durationMs}ms`;
+            statusBarItem.tooltip = `Last typeset in ${durationMs}ms (Click for Botox Layout & Templates menu)`;
+            statusBarItem.backgroundColor = undefined;
+        } else {
+            statusBarItem.text = '$(book) Botox';
+            statusBarItem.tooltip = 'Click for Botox Layout & Templates menu';
+            statusBarItem.backgroundColor = undefined;
+        }
     }
+    statusBarItem.show();
+}
+
+export function updateStatusBarLayout(uri: vscode.Uri, report: InspectReport | null) {
+    if (!statusBarItem) return;
+    const editor = vscode.window.activeTextEditor;
+    const activeMatches = editor && (editor.document.uri.toString() === uri.toString() || editor.document.uri.fsPath === uri.fsPath);
+    if (!activeMatches && BotoxPreviewPanel.currentPanels.size > 1) {
+        return;
+    }
+    if (!report) {
+        updateStatusBar();
+        return;
+    }
+    const config = vscode.workspace.getConfiguration('botox');
+    if (!config.get<boolean>('showStatusBarItem', true)) {
+        statusBarItem.hide();
+        return;
+    }
+    const formatted = formatLayoutStatusText(report);
+    statusBarItem.text = formatted.text;
+    statusBarItem.tooltip = formatted.tooltip;
+    statusBarItem.backgroundColor = formatted.isWarning
+        ? new vscode.ThemeColor('statusBarItem.warningBackground')
+        : undefined;
     statusBarItem.show();
 }
 
@@ -245,6 +293,7 @@ export function reportCompilationFailure(uri: vscode.Uri, errorMsg: string) {
     }
 
     // 6. Set diagnostic with category title and structured details
+    layoutDiagnostics.delete(uri);
     if (range) {
         const diagMsg = `${title}\n\nDetails:\n${details}\n\n${cleaned}`;
         const diag = new vscode.Diagnostic(range, diagMsg, vscode.DiagnosticSeverity.Error);
@@ -261,9 +310,19 @@ export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.command = 'botox.openPreview';
+    statusBarItem.command = 'botox.layoutMenu';
     context.subscriptions.push(statusBarItem);
     context.subscriptions.push(botoxDiagnostics);
+    context.subscriptions.push(layoutDiagnostics);
+
+    // Register Quick Fixes for Botox layout diagnostics
+    context.subscriptions.push(
+        vscode.languages.registerCodeActionsProvider(
+            { language: 'markdown' },
+            new BotoxLayoutCodeActionProvider(),
+            { providedCodeActionKinds: BotoxLayoutCodeActionProvider.providedCodeActionKinds }
+        )
+    );
 
     vscode.window.onDidChangeActiveTextEditor((editor) => {
         updateStatusBar();
@@ -273,6 +332,7 @@ export function activate(context: vscode.ExtensionContext) {
     }, null, context.subscriptions);
     vscode.workspace.onDidCloseTextDocument(doc => {
         botoxDiagnostics.delete(doc.uri);
+        applyLayoutDiagnostics(doc.uri, null);
     }, null, context.subscriptions);
     updateStatusBar();
 
@@ -535,6 +595,99 @@ export function activate(context: vscode.ExtensionContext) {
         () => downloadAndInstallBackend(context)
     );
 
+    // 10. New Document from Template
+    const newFromTemplateCmd = vscode.commands.registerCommand(
+        'botox.newFromTemplate',
+        () => runNewFromTemplateCommand()
+    );
+
+    // 11. Insert Header Template
+    const insertHeaderTemplateCmd = vscode.commands.registerCommand(
+        'botox.insertHeaderTemplate',
+        () => runInsertHeaderTemplateCommand()
+    );
+
+    // 12. Toggle Visual Layout Inspector Overlay
+    const toggleLayoutOverlayCmd = vscode.commands.registerCommand(
+        'botox.toggleLayoutOverlay',
+        (uri?: vscode.Uri) => {
+            const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
+            let panel = targetUri ? BotoxPreviewPanel.get(targetUri) : undefined;
+            if (!panel && BotoxPreviewPanel.currentPanels.size === 1) {
+                panel = Array.from(BotoxPreviewPanel.currentPanels.values())[0];
+            }
+            if (panel) {
+                panel.toggleLayoutOverlay();
+            } else {
+                vscode.window.showInformationMessage('Botox: Open Live Preview first to toggle the layout overlay.');
+            }
+        }
+    );
+
+    // 13. Status Bar Layout & Templates Menu
+    const layoutMenuCmd = vscode.commands.registerCommand(
+        'botox.layoutMenu',
+        async () => {
+            const editor = vscode.window.activeTextEditor;
+            const uri = editor && isBotoxDocument(editor.document) ? editor.document.uri : undefined;
+            const report = uri ? getLatestInspectReport(uri) : undefined;
+
+            const items: Array<vscode.QuickPickItem & { action: string }> = [
+                {
+                    label: '$(open-preview) Open Live PDF Preview',
+                    description: 'Ctrl+K V',
+                    action: 'openPreview'
+                },
+                {
+                    label: '$(inspect) Toggle Visual Layout Overlay',
+                    description: report
+                        ? `${report.page_count}p (${Math.round(report.last_page_fill_pct)}%) · ${report.issue_counts.total} issue(s)`
+                        : 'Show bounding boxes & fill % in preview',
+                    action: 'toggleOverlay'
+                },
+                {
+                    label: '$(symbol-snippet) Insert Header Template...',
+                    description: 'Apply cheatsheet, paper, report, notes, cv, essay, memo, landscape, slides',
+                    action: 'insertHeader'
+                },
+                {
+                    label: '$(new-file) New Document from Template...',
+                    description: 'Scaffold a new file from curated presets',
+                    action: 'newFromTemplate'
+                },
+                {
+                    label: '$(file-pdf) Compile to PDF / HTML Slides',
+                    description: 'Ctrl+Alt+B',
+                    action: 'compilePdf'
+                }
+            ];
+
+            const picked = await vscode.window.showQuickPick(items, {
+                title: 'Botox: Layout & Templates',
+                placeHolder: 'Choose an action...'
+            });
+            if (!picked) return;
+
+            switch (picked.action) {
+                case 'openPreview':
+                    vscode.commands.executeCommand('botox.openPreview', uri);
+                    break;
+                case 'toggleOverlay':
+                    vscode.commands.executeCommand('botox.toggleLayoutOverlay', uri);
+                    break;
+                case 'insertHeader':
+                    vscode.commands.executeCommand('botox.insertHeaderTemplate');
+                    break;
+                case 'newFromTemplate':
+                    vscode.commands.executeCommand('botox.newFromTemplate');
+                    break;
+                case 'compilePdf':
+                    vscode.commands.executeCommand('botox.compilePdf', uri);
+                    break;
+            }
+        }
+    );
+
     // Watch on save
     const onSaveDisposable = vscode.workspace.onDidSaveTextDocument((document) => {
         const config = vscode.workspace.getConfiguration('botox');
@@ -713,6 +866,12 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
                 panel.setSyncScrollEnabled(enabled);
             });
         }
+        if (e.affectsConfiguration('botox.layoutDiagnostics')) {
+            const enabled = vscode.workspace.getConfiguration('botox').get<boolean>('layoutDiagnostics', true);
+            if (!enabled) {
+                layoutDiagnostics.clear();
+            }
+        }
     });
 
     context.subscriptions.push(
@@ -726,6 +885,10 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         setupTerminalCmd,
         resetSetupCmd,
         downloadBackendCmd,
+        newFromTemplateCmd,
+        insertHeaderTemplateCmd,
+        toggleLayoutOverlayCmd,
+        layoutMenuCmd,
         onSaveDisposable,
         onChangeDisposable,
         onSelectionChangeDisposable,
