@@ -383,9 +383,15 @@ export function applyLayoutDiagnostics(uri: vscode.Uri, report: InspectReport | 
     layoutDiagnostics.set(uri, diags);
 }
 
-export async function jumpToEditorLine(uri: vscode.Uri, oneBasedLine: number): Promise<void> {
+export async function jumpToEditorLine(
+    uri: vscode.Uri,
+    oneBasedLine: number,
+    oneBasedCol = 1
+): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(uri);
     const lineIdx = Math.max(0, Math.min(doc.lineCount - 1, oneBasedLine - 1));
+    const lineLen = doc.lineAt(lineIdx).text.length;
+    const colIdx = Math.max(0, Math.min(lineLen, oneBasedCol - 1));
     const existingEditor = vscode.window.visibleTextEditors.find(
         (e) => e.document.uri.toString() === uri.toString() || e.document.uri.fsPath === uri.fsPath
     );
@@ -393,7 +399,7 @@ export async function jumpToEditorLine(uri: vscode.Uri, oneBasedLine: number): P
         ? await vscode.window.showTextDocument(doc, { viewColumn: existingEditor.viewColumn, preserveFocus: false })
         : await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preserveFocus: false });
 
-    const pos = new vscode.Position(lineIdx, 0);
+    const pos = new vscode.Position(lineIdx, colIdx);
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 }
