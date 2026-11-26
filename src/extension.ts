@@ -789,8 +789,9 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
     let lastScrollTime = 0;
     let pendingScrollTimer: NodeJS.Timeout | undefined;
     let lastTargetLine: number | undefined;
+    let lastTargetCol: number | undefined;
 
-    function syncScrollToPreview(editor: vscode.TextEditor, line?: number) {
+    function syncScrollToPreview(editor: vscode.TextEditor, line?: number, col?: number) {
         const fsPath = editor.document.uri.fsPath;
         if (!isBotoxDocumentPath(fsPath)) {
             return;
@@ -805,7 +806,9 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
         }
 
         const targetLine = line !== undefined ? line : editor.selection.active.line;
+        const targetCol = col !== undefined ? col : editor.selection.active.character + 1;
         lastTargetLine = targetLine;
+        lastTargetCol = targetCol;
 
         const now = Date.now();
         const interval = 20; // 50fps smooth tracking
@@ -817,6 +820,7 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
             }
             lastScrollTime = Date.now();
             const l = lastTargetLine !== undefined ? lastTargetLine : targetLine;
+            const c = lastTargetCol !== undefined ? lastTargetCol : targetCol;
             const ctx = getSyncContext(editor.document, l);
             panel.scrollToLine(
                 ctx.line,
@@ -826,7 +830,8 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
                 ctx.isHeading,
                 ctx.frontmatterEndLine,
                 ctx.prevHeading,
-                ctx.nextHeading
+                ctx.nextHeading,
+                c
             );
         };
 
@@ -839,7 +844,8 @@ function getSyncContext(document: vscode.TextDocument, line: number) {
 
     const onSelectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.selections.length > 0) {
-            syncScrollToPreview(event.textEditor, event.selections[0].active.line);
+            const active = event.selections[0].active;
+            syncScrollToPreview(event.textEditor, active.line, active.character + 1);
         }
     });
 

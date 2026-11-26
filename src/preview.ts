@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { abortActivePreview, compileForPreview, VectorCompilationResult, VectorHeadingInfo } from './compiler';
+import {
+    abortActivePreview,
+    compileForPreview,
+    daemonJumpFromClick,
+    daemonJumpFromCursor,
+    VectorCompilationResult,
+    VectorHeadingInfo
+} from './compiler';
 import { reportCompilationSuccess, reportCompilationFailure, updateStatusBarLayout } from './extension';
 import {
     runBotoxInspect,
@@ -143,6 +150,19 @@ export class BotoxPreviewPanel {
                             typeof message.xPt === 'number' &&
                             typeof message.yPt === 'number'
                         ) {
+                            // Fast <1ms character-level jump via warm daemon SyncIndex
+                            const fastJump = await daemonJumpFromClick(
+                                this._documentUri.fsPath,
+                                message.page,
+                                message.xPt,
+                                message.yPt
+                            );
+                            if (fastJump && fastJump.line > 0) {
+                                await jumpToEditorLine(this._documentUri, fastJump.line, fastJump.col);
+                                return;
+                            }
+
+                            // Fallback to one-shot CLI probe
                             const doc = vscode.workspace.textDocuments.find(
                                 d => d.uri.toString() === this._documentUri.toString() || d.uri.fsPath === this._documentUri.fsPath
                             );
@@ -244,8 +264,38 @@ export class BotoxPreviewPanel {
         isHeading?: boolean,
         frontmatterEndLine?: number,
         prevHeading?: { text: string; line: number } | null,
-        nextHeading?: { text: string; line: number } | null
+        nextHeading?: { text: string; line: number } | null,
+        col?: number
     ) {
+        if (!this._isSlides && typeof col === 'number' && col > 0) {
+            void daemonJumpFromCursor(this._documentUri.fsPath, line + 1, col).then((exact) => {
+                if (exact && exact.page > 0) {
+                    this._panel.webview.postMessage({
+                        type: 'exactCursorSync',
+                        page: exact.page,
+                        xPt: exact.x_pt,
+                        yPt: exact.y_pt,
+                        wPt: exact.w_pt,
+                        hPt: exact.h_pt,
+                        yRatio: exact.y_ratio
+                    });
+                    return;
+                }
+                this._panel.webview.postMessage({
+                    type: 'syncScroll',
+                    line,
+                    totalLines,
+                    queryText,
+                    headingText,
+                    isHeading: Boolean(isHeading),
+                    frontmatterEndLine: frontmatterEndLine !== undefined ? frontmatterEndLine : -1,
+                    prevHeading: prevHeading || null,
+                    nextHeading: nextHeading || null
+                });
+            });
+            return;
+        }
+
         this._panel.webview.postMessage({
             type: 'syncScroll',
             line,
@@ -1141,6 +1191,15 @@ export class BotoxPreviewPanel {
       z-index: 25;
       animation: botox-ripple 0.45s ease-out forwards;
     }
+    .botox-cursor-caret {
+      position: absolute;
+      pointer-events: none;
+      z-index: 18;
+      border-left: 2px solid #38bdf8;
+      background: rgba(56, 189, 248, 0.22);
+      border-radius: 2px;
+      transition: opacity 0.25s ease;
+    }
   </style>
 </head>
 <body>
@@ -1163,7 +1222,7 @@ export class BotoxPreviewPanel {
         <input type="checkbox" id="chk-follow-cursor" ${initialSync ? 'checked' : ''} />
         <span>Follow cursor</span>
       </label>
-      <button id="btn-toggle-inspect" class="tool-btn ${initialOverlay ? 'active' : ''}" title="Toggle Visual Layout Inspector Overlay (bounding boxes & page fill % — Ctrl+Click any page to jump to Markdown source)">
+      <button id="btn-toggle-inspect" class="tool-btn ${initialOverlay ? 'active' : ''}" title="Toggle Visual Layout Inspector Overlay (bounding boxes & page fill % — Double-click anywhere on a page to jump to Markdown source)">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
         <span>Inspect</span>
         <span id="inspect-count-pill" class="inspect-count-pill" style="display: none;"></span>
@@ -1679,6 +1738,54 @@ export class BotoxPreviewPanel {
       return null;
     }
 
+    let cursorCaretTimer = null;
+    function handleExactCursorSync(page, xPt, yPt, wPt, hPt, yRatio) {
+      if (!syncScrollEnabled) return;
+      if (cachedPageMetrics.length === 0 || cachedPageMetrics.some(m => !m.height || m.height <= 0)) {
+        updatePageMetrics();
+      }
+      const pageIdx = Math.max(0, Math.min(cachedPageMetrics.length - 1, (page || 1) - 1));
+      const m = cachedPageMetrics[pageIdx];
+      if (!m || m.height <= 0) return;
+
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      if (maxScroll > 0) {
+        const targetY = m.top + (yRatio * m.height);
+        const centeredTarget = targetY - container.clientHeight / 2;
+        container.scrollTop = Math.max(0, Math.min(centeredTarget, maxScroll));
+      }
+
+      // Draw subtle character-level cursor highlight on the exact PDF glyph
+      container.querySelectorAll('.botox-cursor-caret').forEach((el) => el.remove());
+      const pageBox = container.querySelector('#page-' + (pageIdx + 1));
+      const contentSvg = pageBox ? pageBox.querySelector('svg:not(.botox-inspect-overlay)') : null;
+      if (!pageBox || !contentSvg) return;
+
+      const vbAttr = contentSvg.getAttribute('viewBox');
+      if (!vbAttr) return;
+      const parts = vbAttr.trim().split(/[\\s,]+/).map(Number);
+      if (parts.length !== 4 || parts.some(isNaN) || parts[2] <= 0 || parts[3] <= 0) return;
+
+      const leftPct = ((xPt - parts[0]) / parts[2]) * 100;
+      const topPct = ((yPt - parts[1]) / parts[3]) * 100;
+      const widthPct = Math.max((wPt / parts[2]) * 100, 0.6);
+      const heightPct = Math.max((hPt / parts[3]) * 100, 1.2);
+
+      const caret = document.createElement('div');
+      caret.className = 'botox-cursor-caret';
+      caret.style.left = leftPct + '%';
+      caret.style.top = topPct + '%';
+      caret.style.width = widthPct + '%';
+      caret.style.height = heightPct + '%';
+      pageBox.appendChild(caret);
+
+      if (cursorCaretTimer) clearTimeout(cursorCaretTimer);
+      cursorCaretTimer = setTimeout(() => {
+        caret.style.opacity = '0';
+        setTimeout(() => caret.remove(), 300);
+      }, 1400);
+    }
+
     function handleSyncScroll(line, totalLines, queryText, headingText, isHeading, frontmatterEndLine, prevHeading, nextHeading) {
       if (!syncScrollEnabled || totalLines <= 1) return;
 
@@ -2040,9 +2147,9 @@ export class BotoxPreviewPanel {
       });
     }
 
-    // Ctrl+Click / Cmd+Click anywhere on a rendered PDF page -> probe exact Markdown source line
-    container.addEventListener('click', (e) => {
-      if (!(e.ctrlKey || e.metaKey) || currentIsSlides) return;
+    // Double-click anywhere on a rendered PDF page -> jump to exact Markdown line/col or element
+    container.addEventListener('dblclick', (e) => {
+      if (currentIsSlides) return;
       if (e.target && e.target.closest && e.target.closest('.botox-issue-rect')) return;
       const pageBox = e.target && e.target.closest ? e.target.closest('.page-box') : null;
       if (!pageBox) return;
@@ -2074,6 +2181,10 @@ export class BotoxPreviewPanel {
       pageBox.appendChild(ripple);
       setTimeout(() => ripple.remove(), 500);
 
+      if (window.getSelection) {
+        const sel = window.getSelection();
+        if (sel) sel.removeAllRanges();
+      }
       e.preventDefault();
       vscode.postMessage({
         command: 'probeClick',
@@ -2275,6 +2386,15 @@ export class BotoxPreviewPanel {
           const state = vscode.getState() || {};
           vscode.setState({ ...state, docTheme: message.activeTheme });
         }
+      } else if (message.type === 'exactCursorSync') {
+        handleExactCursorSync(
+          message.page,
+          message.xPt,
+          message.yPt,
+          message.wPt,
+          message.hPt,
+          message.yRatio
+        );
       } else if (message.type === 'syncScroll') {
         handleSyncScroll(
           message.line,

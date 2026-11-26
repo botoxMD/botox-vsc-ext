@@ -29,6 +29,24 @@ export interface VectorCompilationResult {
     durationMs?: number;
 }
 
+export interface DaemonClickJumpResult {
+    line: number;
+    col: number;
+    x_pt: number;
+    y_pt: number;
+    w_pt: number;
+    h_pt: number;
+}
+
+export interface DaemonCursorJumpResult {
+    page: number;
+    x_pt: number;
+    y_pt: number;
+    w_pt: number;
+    h_pt: number;
+    y_ratio: number;
+}
+
 let extensionContext: vscode.ExtensionContext | undefined;
 
 export function setExtensionContext(context: vscode.ExtensionContext) {
@@ -257,6 +275,50 @@ class BotoxDaemonClient {
         });
     }
 
+    public async requestSync<T>(
+        binary: string,
+        payload: Record<string, any>,
+        extract: (resp: any) => T | null,
+        timeoutMs = 500
+    ): Promise<T | null> {
+        if (!this.proc || this.proc.killed || this.binaryPath !== binary) {
+            return null;
+        }
+        const id = this.nextId++;
+        const req = { id, ...payload };
+        return new Promise<T | null>((resolve) => {
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    resolve(null);
+                }
+            }, timeoutMs);
+
+            this.pendingRequests.set(id, (resp: any) => {
+                clearTimeout(timer);
+                if (!resp || resp.status !== 'ok') {
+                    resolve(null);
+                    return;
+                }
+                resolve(extract(resp));
+            });
+
+            try {
+                if (!this.proc || !this.proc.stdin || !this.proc.stdin.writable) {
+                    clearTimeout(timer);
+                    this.pendingRequests.delete(id);
+                    resolve(null);
+                    return;
+                }
+                this.proc.stdin.write(JSON.stringify(req) + '\n');
+            } catch {
+                clearTimeout(timer);
+                this.pendingRequests.delete(id);
+                resolve(null);
+            }
+        });
+    }
+
     public dispose() {
         if (this.proc && !this.proc.killed) {
             try {
@@ -272,6 +334,44 @@ const daemonClient = new BotoxDaemonClient();
 
 export function disposeDaemonClient() {
     daemonClient.dispose();
+}
+
+export async function daemonJumpFromClick(
+    sourceFile: string,
+    page: number,
+    xPt: number,
+    yPt: number
+): Promise<DaemonClickJumpResult | null> {
+    const binary = resolveBotoxBinary();
+    return daemonClient.requestSync<DaemonClickJumpResult>(
+        binary,
+        {
+            action: 'jump_from_click',
+            source_file: sourceFile,
+            page,
+            x_pt: xPt,
+            y_pt: yPt,
+        },
+        (resp) => (resp.jump && typeof resp.jump.line === 'number' ? resp.jump : null)
+    );
+}
+
+export async function daemonJumpFromCursor(
+    sourceFile: string,
+    line: number,
+    col: number
+): Promise<DaemonCursorJumpResult | null> {
+    const binary = resolveBotoxBinary();
+    return daemonClient.requestSync<DaemonCursorJumpResult>(
+        binary,
+        {
+            action: 'jump_from_cursor',
+            source_file: sourceFile,
+            line,
+            col,
+        },
+        (resp) => (resp.cursor && typeof resp.cursor.page === 'number' ? resp.cursor : null)
+    );
 }
 
 export async function compileForPreview(
